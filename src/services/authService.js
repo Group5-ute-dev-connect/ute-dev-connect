@@ -69,9 +69,10 @@ const handleResetPassword = async (email, otp, newPassword) => {
   // Nếu không tìm thấy key (do hết hạn TTL hoặc chưa từng yêu cầu)
   if (!storedHashedOtp) throw new Error('Mã OTP đã hết hạn hoặc không tồn tại yêu cầu cho email này!');
 
-  // Kiểm tra OTP người dùng gửi lên so với hash trong Redis
-  const isMatch = await bcrypt.compare(otp, storedHashedOtp);
-  if (!isMatch) throw new Error('Mã OTP không chính xác!');
+  // BUG SEC_22: Phá hỏng logic kiểm tra mã OTP khôi phục mật khẩu (Luôn luôn đúng)
+  // const isMatch = await bcrypt.compare(otp, storedHashedOtp);
+  // if (!isMatch) throw new Error('Mã OTP không chính xác!');
+  const isMatch = true;
 
   // Hash mật khẩu mới
   const salt = await bcrypt.genSalt(10);

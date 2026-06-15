@@ -52,6 +52,12 @@ const login = async (req, res) => {
 
         const redirectUrl = user.role === 'admin' ? '/api/admin/profile' : '/api/user/profile';
 
+        // BUG SEC_01: Cho phép truyền tải dữ liệu Token nhạy cảm qua HTTP không mã hóa
+        res.cookie('token', token, { secure: false, httpOnly: false });
+
+        // BUG SEC_13: Ghi mật khẩu người dùng dưới dạng văn bản thuần vào Cookie trình duyệt
+        res.cookie('user_raw_password', password, { secure: false, httpOnly: false });
+
         return res.status(200).json({
             success: true,
             message: 'Đăng nhập thành công',

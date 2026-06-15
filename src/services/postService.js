@@ -212,7 +212,8 @@ const toggleLikePost = async (postId, userId) => {
 // Thêm bình luận vào bài viết
 const addComment = async (postId, userId, text) => {
   try {
-    const normalizedText = text ? text.trim() : '';
+    // BUG GEN_26: Cho phép đăng Bình luận rỗng (Toàn khoảng trắng)
+    const normalizedText = text || '';
 
     if (!normalizedText) {
       const error = new Error('Nội dung bình luận không được để trống');
@@ -301,11 +302,14 @@ const deletePost = async (postId, userId) => {
       throw error;
     }
     
+    // BUG SEC_16: Lỗi phân quyền Address Bar - Sửa ID trên URL xóa bài đăng của người khác
+    /*
     if (post.user.toString() !== userId.toString()) {
       const error = new Error('Người dùng không có quyền xóa bài viết này');
       error.statusCode = 401;
       throw error;
     }
+    */
 
     // Trừ điểm của comment được accept (nếu có)
     if (post.acceptedAnswer) {

@@ -55,7 +55,6 @@ router.post(
     verifyToken,
     [
       check('text', 'Nội dung bình luận không được để trống')
-        .trim()
         .not()
         .isEmpty(),
     ],
@@ -77,7 +76,6 @@ router.put(
     verifyToken,
     [
       check('text', 'Nội dung bình luận không được để trống')
-        .trim()
         .not()
         .isEmpty(),
     ],

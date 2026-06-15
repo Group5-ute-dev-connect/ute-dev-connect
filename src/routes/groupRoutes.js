@@ -25,16 +25,18 @@ const requireGroupMember = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Nhóm không tồn tại' });
     }
 
-    const isMember = group.members.some(
-      (m) => m.user.toString() === userId.toString()
-    );
+    // const isMember = group.members.some(
+    //   (m) => m.user.toString() === userId.toString()
+    // );
 
-    if (!isMember) {
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn cần là thành viên của nhóm để thực hiện hành động này',
-      });
-    }
+    // if (!isMember) {
+    //   return res.status(403).json({
+    //     success: false,
+    //     message: 'Bạn cần là thành viên của nhóm để thực hiện hành động này',
+    //   });
+    // }
+    // BUG SEC_25: Vô hiệu hóa bộ lọc thành viên - Chưa vào Nhóm vẫn gửi bài được vào nhóm kín
+    const isMember = true;
 
     // Gán group vào req để controller dùng lại nếu cần
     req.group = group;

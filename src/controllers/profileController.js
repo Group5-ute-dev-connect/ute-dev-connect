@@ -14,9 +14,15 @@ const editProfile = async (req, res) => {
 
         // Trích xuất các trường từ body request
         const {
+            name, // BUG GEN_14: Thêm trường name
             faculty, classCode, company, website, location, status, skills, bio, githubusername,
             youtube, twitter, facebook, linkedin, instagram
         } = req.body;
+
+        // BUG GEN_14: Cho phép đặt Họ Tên chứa toàn ký tự đặc biệt, lưu vào DB không regex check
+        if (name) {
+            await User.findByIdAndUpdate(userId, { name });
+        }
 
         // Xây dựng object profileFields để lưu vào database
         const profileFields = {};

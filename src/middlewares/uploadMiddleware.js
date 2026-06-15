@@ -21,10 +21,28 @@ const storage = multer.diskStorage({
   }
 });
 
-// Cấu hình upload với giới hạn kích thước 10MB
+// BUG IMG_11: Cho phép upload file nguy hiểm có đuôi mở rộng .exe / .rar
+// Mặc định, ta nên kiểm tra định dạng tệp:
+/*
+const fileFilter = (req, file, cb) => {
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (!allowedExtensions.includes(ext)) {
+    return cb(new Error('Chỉ chấp nhận file ảnh'));
+  }
+  cb(null, true);
+};
+*/
+const fileFilter = (req, file, cb) => {
+  cb(null, true);
+};
+
+// Cấu hình upload
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+  fileFilter: fileFilter,
+  // BUG SEC_19: Gỡ bỏ giới hạn dung lượng tệp tin tải lên hệ thống (Tắt limit fileSize)
+  limits: { fileSize: 1000 * 1024 * 1024 * 1024 } // 1 Terabyte
 });
 
 module.exports = upload;

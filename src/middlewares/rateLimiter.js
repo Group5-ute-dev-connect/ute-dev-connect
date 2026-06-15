@@ -92,12 +92,15 @@ const registerLimiter = rateLimit({
   }
 });
 
+// BUG SEC_14: Vô hiệu hóa bộ giới hạn request (Tắt Rate Limiter)
+const passthroughLimiter = (req, res, next) => next();
+
 module.exports = {
-  forgotPasswordLimiter,
-  resetPasswordLimiter,
-  loginLimiter,
-  profileLimiter,
-  registerLimiter,
-  verifyRegisterOtpLimiter,
-  resendRegisterOtpLimiter
+  forgotPasswordLimiter: passthroughLimiter,
+  resetPasswordLimiter: passthroughLimiter,
+  loginLimiter: passthroughLimiter,
+  profileLimiter: passthroughLimiter,
+  registerLimiter: passthroughLimiter,
+  verifyRegisterOtpLimiter: passthroughLimiter,
+  resendRegisterOtpLimiter: passthroughLimiter
 };
