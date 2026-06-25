@@ -20,7 +20,9 @@ const validateRegister = [
         .notEmpty()
         .withMessage('Name is required')
         .isLength({ min: 2, max: 100 })
-        .withMessage('Name must be between 2 and 100 characters'),
+        .withMessage('Name must be between 2 and 100 characters')
+        .matches(/^[a-zA-ZÀ-ỹ\s.'-]+$/)
+        .withMessage('Name can only contain letters, spaces, dots or hyphens'),
 
     body('email')
         .trim()

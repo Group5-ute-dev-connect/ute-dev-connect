@@ -63,7 +63,7 @@ router.post(
   '/',
   [
     verifyToken,
-    [check('name', 'Tên nhóm không được để trống').not().isEmpty()],
+    [check('name', 'Tên nhóm không được để trống').trim().not().isEmpty()],
   ],
   groupController.createGroup
 );
@@ -101,7 +101,7 @@ router.post(
   [
     verifyToken,
     requireGroupMember,
-    [check('text', 'Nội dung không được để trống').not().isEmpty()],
+    [check('text', 'Nội dung không được để trống').trim().not().isEmpty()],
   ],
   groupController.createGroupPost
 );

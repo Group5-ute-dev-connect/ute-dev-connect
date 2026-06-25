@@ -21,28 +21,34 @@ const storage = multer.diskStorage({
   }
 });
 
-// BUG IMG_11: Cho phép upload file nguy hiểm có đuôi mở rộng .exe / .rar
-// Mặc định, ta nên kiểm tra định dạng tệp:
-/*
 const fileFilter = (req, file, cb) => {
-  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif'];
-  const ext = path.extname(file.originalname).toLowerCase();
-  if (!allowedExtensions.includes(ext)) {
-    return cb(new Error('Chỉ chấp nhận file ảnh'));
+  const allowedMimeTypes = [
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+    'application/pdf',
+    'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'text/plain',
+    'video/mp4', 'video/webm'
+  ];
+  
+  const dangerousExtensions = ['.exe', '.bat', '.sh', '.cmd', '.msi', '.com', '.scr', '.ps1', '.vbs', '.js'];
+  const ext = '.' + file.originalname.split('.').pop().toLowerCase();
+  
+  if (dangerousExtensions.includes(ext)) {
+    return cb(new Error('Định dạng file không được hỗ trợ'), false);
   }
-  cb(null, true);
-};
-*/
-const fileFilter = (req, file, cb) => {
-  cb(null, true);
+  
+  if (allowedMimeTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Định dạng file không được hỗ trợ'), false);
+  }
 };
 
-// Cấu hình upload
+// Cấu hình upload với giới hạn kích thước 10MB
 const upload = multer({
   storage: storage,
-  fileFilter: fileFilter,
-  // BUG SEC_19: Gỡ bỏ giới hạn dung lượng tệp tin tải lên hệ thống (Tắt limit fileSize)
-  limits: { fileSize: 1000 * 1024 * 1024 * 1024 } // 1 Terabyte
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  fileFilter: fileFilter
 });
 
 module.exports = upload;
