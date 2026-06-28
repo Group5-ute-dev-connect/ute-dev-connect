@@ -83,6 +83,11 @@ router.put('/accept/:id/:comment_id', verifyToken, postController.acceptAnswer);
 // @access  Private
 router.put('/comment/:id/:comment_id/approve', verifyToken, postController.approveComment);
 
+// @route   PUT /api/posts/comment/:id/:comment_id/disapprove
+// @desc    Phản đối bình luận (Downvote)
+// @access  Private
+router.put('/comment/:id/:comment_id/disapprove', verifyToken, postController.disapproveComment);
+
 // @route   PUT /api/posts/comment/:id/:comment_id
 // @desc    Sửa bình luận
 // @access  Private

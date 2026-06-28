@@ -792,31 +792,93 @@ const approveComment = async (postId, commentId, userId) => {
       throw error;
     }
 
-    if (!comment.approvals) {
-      comment.approvals = [];
-    }
+    if (!comment.approvals) comment.approvals = [];
+    if (!comment.disapprovals) comment.disapprovals = [];
 
     const approvedIndex = comment.approvals.findIndex(
       (app) => app.user.toString() === userId.toString()
     );
+    const disapprovedIndex = comment.disapprovals.findIndex(
+      (dis) => dis.user.toString() === userId.toString()
+    );
 
-    let approved = false;
     let reputationChange = 0;
 
     if (approvedIndex === -1) {
       comment.approvals.push({ user: userId });
-      approved = true;
-      reputationChange = 10; // Cộng 10 điểm uy tín
+      reputationChange += 10;
+
+      if (disapprovedIndex !== -1) {
+        comment.disapprovals.splice(disapprovedIndex, 1);
+        reputationChange += 10; // Hủy downvote cũ, hoàn lại điểm
+      }
     } else {
       comment.approvals.splice(approvedIndex, 1);
-      approved = false;
-      reputationChange = -10; // Trừ 10 điểm uy tín
+      reputationChange -= 10;
     }
 
     await post.save();
 
-    // Cập nhật reputation cho commenter nếu không tự upvote
-    if (comment.user && comment.user.toString() !== userId.toString()) {
+    if (comment.user && comment.user.toString() !== userId.toString() && reputationChange !== 0) {
+      await User.findByIdAndUpdate(comment.user, {
+        $inc: { reputation: reputationChange }
+      });
+    }
+
+    await post.populate('comments.user', 'name avatar reputation');
+    return post.comments;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Phản đối bình luận (Downvote / Disapprove Comment)
+const disapproveComment = async (postId, commentId, userId) => {
+  console.log(`[postService.disapproveComment] Khởi tạo. Post: ${postId}, Comment: ${commentId}, User: ${userId}`);
+  try {
+    const post = await Post.findById(postId);
+    if (!post) {
+      console.log(`[postService.disapproveComment] LỖI: Không tìm thấy bài viết ${postId}`);
+      const error = new Error('Bài viết không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const comment = post.comments.id ? post.comments.id(commentId) : post.comments.find(c => c._id.toString() === commentId.toString());
+    if (!comment) {
+      const error = new Error('Bình luận không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!comment.approvals) comment.approvals = [];
+    if (!comment.disapprovals) comment.disapprovals = [];
+
+    const approvedIndex = comment.approvals.findIndex(
+      (app) => app.user.toString() === userId.toString()
+    );
+    const disapprovedIndex = comment.disapprovals.findIndex(
+      (dis) => dis.user.toString() === userId.toString()
+    );
+
+    let reputationChange = 0;
+
+    if (disapprovedIndex === -1) {
+      comment.disapprovals.push({ user: userId });
+      reputationChange -= 10;
+
+      if (approvedIndex !== -1) {
+        comment.approvals.splice(approvedIndex, 1);
+        reputationChange -= 10; // Hủy upvote cũ, trừ thêm điểm
+      }
+    } else {
+      comment.disapprovals.splice(disapprovedIndex, 1);
+      reputationChange += 10; // Hủy downvote, cộng lại điểm
+    }
+
+    await post.save();
+
+    if (comment.user && comment.user.toString() !== userId.toString() && reputationChange !== 0) {
       await User.findByIdAndUpdate(comment.user, {
         $inc: { reputation: reputationChange }
       });
@@ -847,4 +909,5 @@ module.exports = {
   deleteComment,
   acceptAnswer,
   approveComment,
+  disapproveComment,
 };
