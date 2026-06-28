@@ -5,11 +5,50 @@ const PostView = require('../models/PostView');
 
 const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
   try {
+    let status = 'approved';
+    let isPendingDueToBannedWord = false;
+
+    // Lấy thông tin nhóm học tập
+    let group = null;
+    if (groupId) {
+      group = await Group.findById(groupId);
+    }
+
     // Lọc nội dung cấm hoặc AI
     const filterService = require('./filterService');
-    await filterService.checkContent(text);
-    if (codeSnippet) {
-      await filterService.checkContent(codeSnippet);
+    const groupBannedWords = group ? (group.bannedWords || []) : [];
+
+    // Kiểm tra xem người đăng có phải Admin hoặc Mod nhóm không, nếu có thì tự động duyệt thông qua
+    const isAdminOrMod = group && (group.admin.toString() === userId.toString() ||
+                         (group.moderators && group.moderators.some(m => m.toString() === userId.toString())));
+
+    let textCheck = { isViolation: false };
+    let codeCheck = { isViolation: false };
+
+    if (!isAdminOrMod) {
+      textCheck = await filterService.checkContentWithGroup(text, groupBannedWords);
+      if (codeSnippet) {
+        codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+      }
+    }
+
+    if (groupId) {
+      if (!isAdminOrMod) {
+        if (group && group.postModerationType === 'manual') {
+          status = 'pending';
+        } else if (textCheck.isViolation || codeCheck.isViolation) {
+          status = 'pending';
+          isPendingDueToBannedWord = true;
+        }
+      }
+    } else {
+      if (textCheck.isViolation || codeCheck.isViolation) {
+        const violationWord = textCheck.word || codeCheck.word || '';
+        const violationReason = textCheck.reason || codeCheck.reason || '';
+        const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     const user = await User.findById(userId).select('-password');
@@ -18,18 +57,6 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
       const error = new Error('Người dùng không tồn tại');
       error.statusCode = 404;
       throw error;
-    }
-
-    let status = 'approved';
-    if (groupId) {
-      const group = await Group.findById(groupId);
-      if (group) {
-        const isAdmin = group.admin.toString() === userId.toString();
-        const isMod = group.moderators && group.moderators.some(m => m.toString() === userId.toString());
-        if (!isAdmin && !isMod) {
-          status = 'pending';
-        }
-      }
     }
 
     const newPost = new Post({
@@ -47,6 +74,20 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
 
     let post = await newPost.save();
     post = await Post.findById(post._id).populate('user', 'name avatar reputation');
+
+    // Nếu bài đăng ở trạng thái pending trong nhóm, tạo thông báo hệ thống và gửi qua socket tới Admin/Mod nhóm
+    if (status === 'pending' && group) {
+      const notificationService = require('./notificationService');
+      const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+      for (const adminId of admins) {
+        try {
+          await notificationService.createNotification(adminId, userId, 'post_pending', post._id);
+        } catch (err) {
+          console.error('Lỗi tạo thông báo pending cho Admin/Mod nhóm:', err.message);
+        }
+      }
+    }
+
     return post;
   } catch (error) {
     throw error;
@@ -563,13 +604,6 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
       throw error;
     }
 
-    // Lọc nội dung cấm hoặc AI
-    const filterService = require('./filterService');
-    await filterService.checkContent(normalizedText);
-    if (codeSnippet) {
-      await filterService.checkContent(codeSnippet);
-    }
-
     const user = await User.findById(userId).select('-password');
 
     if (!user) {
@@ -583,6 +617,30 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
     if (!post) {
       const error = new Error('Bài viết không tồn tại');
       error.statusCode = 404;
+      throw error;
+    }
+
+    // Lọc nội dung cấm hoặc AI dựa trên nhóm học tập của bài viết
+    let groupBannedWords = [];
+    if (post.group) {
+      const group = await Group.findById(post.group);
+      if (group) {
+        groupBannedWords = group.bannedWords || [];
+      }
+    }
+
+    const filterService = require('./filterService');
+    const textCheck = await filterService.checkContentWithGroup(normalizedText, groupBannedWords);
+    let codeCheck = { isViolation: false };
+    if (codeSnippet) {
+      codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+    }
+
+    if (textCheck.isViolation || codeCheck.isViolation) {
+      const violationWord = textCheck.word || codeCheck.word || '';
+      const violationReason = textCheck.reason || codeCheck.reason || '';
+      const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+      error.statusCode = 400;
       throw error;
     }
 
@@ -618,15 +676,6 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
 // Cập nhật bài viết
 const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLanguage, visibility) => {
   try {
-    // Lọc nội dung cấm hoặc AI
-    const filterService = require('./filterService');
-    if (text !== undefined) {
-      await filterService.checkContent(text);
-    }
-    if (codeSnippet !== undefined) {
-      await filterService.checkContent(codeSnippet);
-    }
-
     const post = await Post.findById(postId);
     if (!post || post.isDeleted) {
       const error = new Error('Bài viết không tồn tại');
@@ -639,14 +688,100 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
       throw error;
     }
 
-    post.text = text !== undefined ? text : post.text;
-    post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
-    post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
-    post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+    let status = 'approved';
+    const filterService = require('./filterService');
+
+    // Nếu bài viết thuộc nhóm học tập, kiểm tra bộ lọc nhóm + bộ lọc hệ thống
+    if (post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      
+      const isAdminOrMod = group && (group.admin.toString() === userId.toString() ||
+                           (group.moderators && group.moderators.some(m => m.toString() === userId.toString())));
+      
+      if (isAdminOrMod) {
+        status = 'approved';
+      } else {
+        if (group && group.postModerationType === 'manual') {
+          status = 'pending';
+        } else {
+          const checkText = text !== undefined ? text : post.text;
+          const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+          
+          const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
+          const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
+          
+          if (checkResult.isViolation || snippetCheckResult.isViolation) {
+            status = 'pending';
+          }
+        }
+      }
+    } else {
+      // Bài viết công khai ngoài nhóm, nếu dính từ cấm hệ thống thì chặn lỗi 400 như cũ
+      if (text !== undefined) {
+        await filterService.checkContent(text);
+      }
+      if (codeSnippet !== undefined) {
+        await filterService.checkContent(codeSnippet);
+      }
+    }
+
+    const isAlreadyApproved = post.status === 'approved';
+
+    if (status === 'pending') {
+      if (isAlreadyApproved) {
+        // Lưu chỉnh sửa vào pendingEdit, giữ nguyên nội dung bài đăng đang hiện hữu
+        post.pendingEdit = {
+          text: text !== undefined ? text : post.text,
+          codeSnippet: codeSnippet !== undefined ? codeSnippet : post.codeSnippet,
+          codeLanguage: codeLanguage !== undefined ? codeLanguage : post.codeLanguage,
+          isQuestion: isQuestion !== undefined ? isQuestion : post.isQuestion,
+          status: 'pending'
+        };
+      } else {
+        // Bài viết mới chưa duyệt, ghi đè trực tiếp
+        post.text = text !== undefined ? text : post.text;
+        post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
+        post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+        post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+        post.status = 'pending';
+      }
+    } else {
+      // Nội dung sửa đổi hợp lệ, lưu đè trực tiếp và xóa pendingEdit cũ (nếu có)
+      post.text = text !== undefined ? text : post.text;
+      post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
+      post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+      post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+      post.pendingEdit = undefined;
+      
+      // Nếu bài viết thuộc nhóm, chuyển trạng thái về approved
+      if (post.group) {
+        post.status = 'approved';
+      }
+    }
+    
     post.visibility = visibility !== undefined ? visibility : post.visibility;
     
     await post.save();
     await post.populate('user', 'name avatar reputation');
+
+    // Nếu chuyển sang pending, tạo thông báo cho Admin/Mod nhóm
+    if (status === 'pending' && post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      if (group) {
+        const notificationService = require('./notificationService');
+        const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+        for (const adminId of admins) {
+          try {
+            await notificationService.createNotification(adminId, userId, 'post_pending', post._id);
+          } catch (err) {
+            console.error('Lỗi tạo thông báo pending cho Admin/Mod nhóm khi sửa bài:', err.message);
+          }
+        }
+      }
+    }
+
     return post;
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -668,7 +803,22 @@ const deletePost = async (postId, userId) => {
       throw error;
     }
     
-    if (post.user.toString() !== userId.toString()) {
+    let hasDeletePermission = post.user.toString() === userId.toString();
+    
+    // Nếu là bài viết trong nhóm, cho phép Admin/Mod nhóm xóa bài viết đó
+    if (!hasDeletePermission && post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      if (group) {
+        const isAdmin = group.admin.toString() === userId.toString();
+        const isMod = group.moderators && group.moderators.some(m => m.toString() === userId.toString());
+        if (isAdmin || isMod) {
+          hasDeletePermission = true;
+        }
+      }
+    }
+
+    if (!hasDeletePermission) {
       const error = new Error('Người dùng không có quyền xóa bài viết này');
       error.statusCode = 401;
       throw error;

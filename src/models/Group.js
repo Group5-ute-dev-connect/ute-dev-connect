@@ -68,6 +68,21 @@ const GroupSchema = new Schema({
     type: Boolean,
     default: true
   },
+  // Bộ lọc từ cấm riêng của nhóm học tập
+  bannedWords: {
+    type: [String],
+    default: []
+  },
+  privacyType: {
+    type: String,
+    enum: ['public', 'private'],
+    default: 'private'
+  },
+  postModerationType: {
+    type: String,
+    enum: ['auto', 'manual'],
+    default: 'auto'
+  },
   date: {
     type: Date,
     default: Date.now

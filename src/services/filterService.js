@@ -114,7 +114,42 @@ const checkContentLocalAI = (text) => {
   }
 };
 
+// Kiểm tra nội dung kết hợp bộ lọc hệ thống và bộ lọc riêng của nhóm
+const checkContentWithGroup = async (text, groupBannedWords = []) => {
+  if (!text) return { isViolation: false };
+  const filter = await getOrCreateFilter();
+  const normalizedText = text.toLowerCase();
+
+  // 1. Kiểm tra từ cấm của hệ thống
+  for (const word of filter.bannedWords) {
+    if (normalizedText.includes(word.toLowerCase())) {
+      return { isViolation: true, word, isGlobal: true };
+    }
+  }
+
+  // 2. Kiểm tra từ cấm riêng của nhóm
+  for (const word of groupBannedWords) {
+    if (normalizedText.includes(word.toLowerCase())) {
+      return { isViolation: true, word, isGlobal: false };
+    }
+  }
+
+  // 3. Kiểm tra bằng AI (nếu được bật)
+  if (filter.aiFilterEnabled) {
+    try {
+      await checkContentWithMistral(text);
+    } catch (err) {
+      if (err.statusCode) {
+        return { isViolation: true, reason: err.message, isAI: true };
+      }
+    }
+  }
+
+  return { isViolation: false };
+};
+
 module.exports = {
   getOrCreateFilter,
-  checkContent
+  checkContent,
+  checkContentWithGroup
 };
