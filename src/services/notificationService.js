@@ -20,7 +20,7 @@ const createNotification = async (recipientId, senderId, type, postId = null) =>
     // Populate sender và post text để gửi qua socket.io
     const populated = await Notification.findById(notification._id)
       .populate('sender', 'name avatar')
-      .populate('post', 'text');
+      .populate('post', 'text group');
 
     // Gửi thông báo real-time qua socket
     const socketIO = require('../utils/socketIO');
@@ -48,7 +48,7 @@ const getNotifications = async (userId, page = 1, limit = 20) => {
       .skip(skip)
       .limit(limit)
       .populate('sender', 'name avatar')
-      .populate('post', 'text');
+      .populate('post', 'text group');
     
     return {
       notifications,

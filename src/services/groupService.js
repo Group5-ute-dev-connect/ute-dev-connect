@@ -537,7 +537,23 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
   if (status === 'approved') {
     post.status = 'approved';
     await post.save();
+
+    // Tạo thông báo duyệt thành công cho tác giả bài viết
+    const notificationService = require('./notificationService');
+    try {
+      await notificationService.createNotification(post.user, userId, 'post_approved', post._id);
+    } catch (err) {
+      console.error('Lỗi tạo thông báo duyệt bài viết:', err.message);
+    }
   } else if (status === 'rejected') {
+    // Tạo thông báo bị từ chối cho tác giả bài viết trước khi xóa
+    const notificationService = require('./notificationService');
+    try {
+      await notificationService.createNotification(post.user, userId, 'post_rejected', post._id);
+    } catch (err) {
+      console.error('Lỗi tạo thông báo từ chối bài viết:', err.message);
+    }
+
     await post.deleteOne();
   } else {
     const err = new Error('Trạng thái duyệt không hợp lệ');

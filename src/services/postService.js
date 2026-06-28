@@ -63,22 +63,16 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
     let post = await newPost.save();
     post = await Post.findById(post._id).populate('user', 'name avatar reputation');
 
-    // Nếu bài đăng ở trạng thái pending trong nhóm, gửi thông báo socket tới Admin/Mod nhóm
+    // Nếu bài đăng ở trạng thái pending trong nhóm, tạo thông báo hệ thống và gửi qua socket tới Admin/Mod nhóm
     if (status === 'pending' && group) {
-      const socketIO = require('../utils/socketIO');
-      try {
-        const io = socketIO.getIO();
-        const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
-        admins.forEach(adminId => {
-          io.to(adminId).emit('new_pending_post_alert', {
-            groupId: group._id,
-            groupName: group.name,
-            postId: post._id,
-            message: `Có bài viết mới chứa từ khóa cấm cần duyệt trong nhóm học tập "${group.name}".`
-          });
-        });
-      } catch (err) {
-        console.error('Lỗi gửi socket pending post alert:', err.message);
+      const notificationService = require('./notificationService');
+      const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+      for (const adminId of admins) {
+        try {
+          await notificationService.createNotification(adminId, userId, 'post_pending', post._id);
+        } catch (err) {
+          console.error('Lỗi tạo thông báo pending cho Admin/Mod nhóm:', err.message);
+        }
       }
     }
 

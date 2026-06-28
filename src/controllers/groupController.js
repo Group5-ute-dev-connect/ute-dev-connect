@@ -164,7 +164,11 @@ const createGroupPost = async (req, res) => {
       req.body.codeLanguage || 'javascript'
     );
 
-    res.status(201).json({ success: true, message: 'Đăng bài trong nhóm thành công', data: post });
+    const message = post.status === 'pending'
+      ? 'Bài viết chứa từ khóa nhạy cảm và đã được gửi tới Ban quản trị nhóm để duyệt.'
+      : 'Đăng bài trong nhóm thành công';
+
+    res.status(201).json({ success: true, message, data: post });
   } catch (err) {
     console.error(err.message);
     if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
