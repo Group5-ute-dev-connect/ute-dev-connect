@@ -73,6 +73,16 @@ const GroupSchema = new Schema({
     type: [String],
     default: []
   },
+  privacyType: {
+    type: String,
+    enum: ['public', 'private'],
+    default: 'private'
+  },
+  postModerationType: {
+    type: String,
+    enum: ['auto', 'manual'],
+    default: 'auto'
+  },
   date: {
     type: Date,
     default: Date.now

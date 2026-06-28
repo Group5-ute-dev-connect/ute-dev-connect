@@ -394,6 +394,20 @@ const kickMember = async (req, res) => {
   }
 };
 
+const updateGroupSettings = async (req, res) => {
+  try {
+    const adminId = getUserId(req);
+    const { privacyType, postModerationType } = req.body;
+    const group = await groupService.updateGroupSettings(req.params.id, adminId, { privacyType, postModerationType });
+
+    res.status(200).json({ success: true, message: 'Cập nhật cấu hình cài đặt nhóm thành công', data: group });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -415,4 +429,5 @@ module.exports = {
   addGroupFilter,
   deleteGroupFilter,
   kickMember,
+  updateGroupSettings,
 };

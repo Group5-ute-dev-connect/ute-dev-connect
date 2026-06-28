@@ -152,6 +152,8 @@ const getGroupById = async (groupId, userId) => {
 
   return {
     ...group.toObject(),
+    privacyType: group.privacyType || 'private',
+    postModerationType: group.postModerationType || 'auto',
     isMember: userId ? isMember(group, userId) : false,
     isAdmin: userId ? isGroupAdmin(group, userId) : false,
     isMod: userId ? isGroupModerator(group, userId) : false,
@@ -164,6 +166,10 @@ const getGroupById = async (groupId, userId) => {
  */
 const joinGroup = async (groupId, userId) => {
   const group = await getActiveGroupOrThrow(groupId);
+  console.log('--- DEBUG joinGroup ---');
+  console.log('Group Name:', group.name);
+  console.log('Group Privacy:', group.privacyType);
+  console.log('User ID:', userId);
 
   if (!group) {
     const err = new Error('Nhóm không tồn tại');
@@ -175,6 +181,17 @@ const joinGroup = async (groupId, userId) => {
     const err = new Error('Bạn đã là thành viên của nhóm này');
     err.statusCode = 400;
     throw err;
+  }
+
+  // Nếu là nhóm cộng đồng, cho phép tham gia trực tiếp không cần duyệt
+  if (group.privacyType === 'public') {
+    group.members.push({ user: userId });
+    await group.save();
+    return {
+      message: 'Tham gia nhóm thành công',
+      status: 'approved',
+      membersCount: group.members.length
+    };
   }
 
   const pendingRequest = findPendingJoinRequest(group, userId);
@@ -725,6 +742,37 @@ const kickMember = async (groupId, adminId, targetUserId) => {
   return { message: 'Đã xóa thành viên khỏi nhóm thành công', membersCount: group.members.length };
 };
 
+const updateGroupSettings = async (groupId, adminId, { privacyType, postModerationType }) => {
+  const group = await getActiveGroupOrThrow(groupId);
+
+  if (group.admin.toString() !== adminId.toString()) {
+    const err = new Error('Chỉ Admin nhóm mới có quyền thay đổi cài đặt nhóm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  if (privacyType) {
+    if (!['public', 'private'].includes(privacyType)) {
+      const err = new Error('Loại riêng tư không hợp lệ');
+      err.statusCode = 400;
+      throw err;
+    }
+    group.privacyType = privacyType;
+  }
+
+  if (postModerationType) {
+    if (!['auto', 'manual'].includes(postModerationType)) {
+      const err = new Error('Chế độ kiểm duyệt không hợp lệ');
+      err.statusCode = 400;
+      throw err;
+    }
+    group.postModerationType = postModerationType;
+  }
+
+  await group.save();
+  return group;
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -748,4 +796,5 @@ module.exports = {
   addGroupFilter,
   deleteGroupFilter,
   kickMember,
+  updateGroupSettings,
 };

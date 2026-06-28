@@ -161,4 +161,9 @@ router.delete('/:id/filters/:word', verifyToken, groupController.deleteGroupFilt
 // @access  Private
 router.delete('/:id/members/:userId', verifyToken, groupController.kickMember);
 
+// @route   PUT /api/groups/:id/settings
+// @desc    Cập nhật cấu hình cài đặt nhóm (chỉ Admin nhóm)
+// @access  Private
+router.put('/:id/settings', verifyToken, groupController.updateGroupSettings);
+
 module.exports = router;

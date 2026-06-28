@@ -32,13 +32,17 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
       }
     }
 
-    if (textCheck.isViolation || codeCheck.isViolation) {
-      if (groupId) {
-        // Trong nhóm học tập: chuyển trạng thái thành 'pending' để admin nhóm duyệt
-        status = 'pending';
-        isPendingDueToBannedWord = true;
-      } else {
-        // Ngoài nhóm: chặn hoàn toàn
+    if (groupId) {
+      if (!isAdminOrMod) {
+        if (group && group.postModerationType === 'manual') {
+          status = 'pending';
+        } else if (textCheck.isViolation || codeCheck.isViolation) {
+          status = 'pending';
+          isPendingDueToBannedWord = true;
+        }
+      }
+    } else {
+      if (textCheck.isViolation || codeCheck.isViolation) {
         const violationWord = textCheck.word || codeCheck.word || '';
         const violationReason = textCheck.reason || codeCheck.reason || '';
         const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
@@ -698,14 +702,18 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
       if (isAdminOrMod) {
         status = 'approved';
       } else {
-        const checkText = text !== undefined ? text : post.text;
-        const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
-        
-        const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
-        const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
-        
-        if (checkResult.isViolation || snippetCheckResult.isViolation) {
+        if (group && group.postModerationType === 'manual') {
           status = 'pending';
+        } else {
+          const checkText = text !== undefined ? text : post.text;
+          const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+          
+          const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
+          const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
+          
+          if (checkResult.isViolation || snippetCheckResult.isViolation) {
+            status = 'pending';
+          }
         }
       }
     } else {
