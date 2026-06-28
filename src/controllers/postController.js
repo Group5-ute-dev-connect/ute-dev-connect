@@ -60,7 +60,8 @@ const addPost = async (req, res) => {
 
 const getPost = async (req, res) => {
   try {
-    const post = await postService.getPostById(req.params.id, getUserId(req));
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+    const post = await postService.getPostById(req.params.id, getUserId(req), clientIp);
 
     res.status(200).json({
       success: true,
@@ -88,8 +89,10 @@ const getAllPosts = async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 5;
+    const filter = req.query.filter || 'latest';
+    const timeframe = req.query.timeframe || '7d';
 
-    const result = await postService.getAllPosts(page, limit, getUserId(req));
+    const result = await postService.getAllPosts(page, limit, getUserId(req), filter, timeframe);
 
     res.status(200).json({
       success: true,
@@ -98,6 +101,8 @@ const getAllPosts = async (req, res) => {
       total: result.total,
       page,
       limit,
+      filter,
+      timeframe,
     });
   } catch (err) {
     console.error(err.message);

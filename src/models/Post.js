@@ -50,6 +50,10 @@ const PostSchema = new Schema({
     enum: ['public', 'personal', 'followers', 'friends'],
     default: 'public'
   },
+  views: {
+    type: Number,
+    default: 0
+  },
   isHidden: {
     type: Boolean,
     default: false
