@@ -548,6 +548,86 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
   return { message: status === 'approved' ? 'Đã phê duyệt bài viết' : 'Đã từ chối và xóa bài viết' };
 };
 
+/**
+ * Lấy bộ lọc từ cấm của nhóm (chỉ admin / mod)
+ */
+const getGroupFilters = async (groupId, userId) => {
+  const group = await getActiveGroupOrThrow(groupId);
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!canManageGroup(group, userId)) {
+    const err = new Error('Chỉ admin hoặc kiểm duyệt viên mới có quyền xem bộ lọc từ cấm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return group.bannedWords || [];
+};
+
+/**
+ * Thêm từ cấm vào nhóm (chỉ admin / mod)
+ */
+const addGroupFilter = async (groupId, userId, word) => {
+  const group = await getActiveGroupOrThrow(groupId);
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!canManageGroup(group, userId)) {
+    const err = new Error('Chỉ admin hoặc kiểm duyệt viên mới có quyền thêm từ cấm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const cleanWord = word ? word.trim() : '';
+  if (!cleanWord) {
+    const err = new Error('Từ cấm không được để trống');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (group.bannedWords.some(w => w.toLowerCase() === cleanWord.toLowerCase())) {
+    const err = new Error('Từ cấm này đã tồn tại trong bộ lọc nhóm');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  group.bannedWords.push(cleanWord);
+  await group.save();
+
+  return group.bannedWords;
+};
+
+/**
+ * Xóa từ cấm khỏi nhóm (chỉ admin / mod)
+ */
+const deleteGroupFilter = async (groupId, userId, word) => {
+  const group = await getActiveGroupOrThrow(groupId);
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!canManageGroup(group, userId)) {
+    const err = new Error('Chỉ admin hoặc kiểm duyệt viên mới có quyền xóa từ cấm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const decodedWord = decodeURIComponent(word).trim().toLowerCase();
+  group.bannedWords = group.bannedWords.filter(w => w.toLowerCase() !== decodedWord);
+  await group.save();
+
+  return group.bannedWords;
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -567,4 +647,7 @@ module.exports = {
   toggleModerator,
   getPendingPosts,
   updatePostStatus,
+  getGroupFilters,
+  addGroupFilter,
+  deleteGroupFilter,
 };

@@ -330,6 +330,53 @@ const updatePostStatus = async (req, res) => {
   }
 };
 
+// @desc    Lấy bộ lọc từ cấm của nhóm
+// @access  Private
+const getGroupFilters = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const groupId = req.params.id;
+    const filters = await groupService.getGroupFilters(groupId, userId);
+    res.status(200).json({ success: true, data: filters });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+// @desc    Thêm từ cấm vào bộ lọc của nhóm
+// @access  Private
+const addGroupFilter = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const groupId = req.params.id;
+    const { word } = req.body;
+    const filters = await groupService.addGroupFilter(groupId, userId, word);
+    res.status(200).json({ success: true, message: 'Thêm từ cấm thành công', data: filters });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+// @desc    Xóa từ cấm khỏi bộ lọc của nhóm
+// @access  Private
+const deleteGroupFilter = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const groupId = req.params.id;
+    const { word } = req.params;
+    const filters = await groupService.deleteGroupFilter(groupId, userId, word);
+    res.status(200).json({ success: true, message: 'Xóa từ cấm thành công', data: filters });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -347,4 +394,7 @@ module.exports = {
   toggleModerator,
   getPendingPosts,
   updatePostStatus,
+  getGroupFilters,
+  addGroupFilter,
+  deleteGroupFilter,
 };

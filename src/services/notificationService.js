@@ -16,6 +16,21 @@ const createNotification = async (recipientId, senderId, type, postId = null) =>
     });
 
     await notification.save();
+
+    // Populate sender và post text để gửi qua socket.io
+    const populated = await Notification.findById(notification._id)
+      .populate('sender', 'name avatar')
+      .populate('post', 'text');
+
+    // Gửi thông báo real-time qua socket
+    const socketIO = require('../utils/socketIO');
+    try {
+      const io = socketIO.getIO();
+      io.to(recipientId.toString()).emit('new_notification', populated);
+    } catch (err) {
+      console.error('Lỗi khi gửi socket notification:', err.message);
+    }
+
     return notification;
   } catch (error) {
     console.error('Lỗi khi tạo thông báo:', error.message);

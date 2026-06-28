@@ -141,4 +141,19 @@ router.get('/:id/pending-posts', verifyToken, groupController.getPendingPosts);
 // @access  Private
 router.put('/:id/posts/:postId/status', verifyToken, groupController.updatePostStatus);
 
+// @route   GET /api/groups/:id/filters
+// @desc    Lấy danh sách từ cấm của nhóm (chỉ Admin / Mod nhóm)
+// @access  Private
+router.get('/:id/filters', verifyToken, groupController.getGroupFilters);
+
+// @route   POST /api/groups/:id/filters
+// @desc    Thêm từ cấm vào nhóm (chỉ Admin / Mod nhóm)
+// @access  Private
+router.post('/:id/filters', verifyToken, groupController.addGroupFilter);
+
+// @route   DELETE /api/groups/:id/filters/:word
+// @desc    Xóa từ cấm khỏi nhóm (chỉ Admin / Mod nhóm)
+// @access  Private
+router.delete('/:id/filters/:word', verifyToken, groupController.deleteGroupFilter);
+
 module.exports = router;

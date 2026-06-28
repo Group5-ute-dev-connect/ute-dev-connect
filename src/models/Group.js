@@ -68,6 +68,11 @@ const GroupSchema = new Schema({
     type: Boolean,
     default: true
   },
+  // Bộ lọc từ cấm riêng của nhóm học tập
+  bannedWords: {
+    type: [String],
+    default: []
+  },
   date: {
     type: Date,
     default: Date.now

@@ -28,7 +28,7 @@ app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/filters', require('./routes/filterRoutes'));
 
 const http = require('http');
-const { Server } = require('socket.io');
+const socketIO = require('./utils/socketIO');
 const { ExpressPeerServer } = require('peer');
 
 const server = http.createServer(app);
@@ -40,12 +40,7 @@ const peerServer = ExpressPeerServer(server, {
 });
 app.use('/peer', peerServer);
 
-const io = new Server(server, {
-  cors: {
-    origin: '*', // Tạm thời allow all origin để test frontend dễ dàng
-    methods: ['GET', 'POST'],
-  },
-});
+const io = socketIO.init(server);
 
 const Message = require('./models/Message');
 const Conversation = require('./models/Conversation');

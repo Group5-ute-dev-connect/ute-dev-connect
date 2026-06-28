@@ -5,11 +5,38 @@ const PostView = require('../models/PostView');
 
 const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
   try {
+    let status = 'approved';
+    let isPendingDueToBannedWord = false;
+
+    // Lấy thông tin nhóm học tập
+    let group = null;
+    if (groupId) {
+      group = await Group.findById(groupId);
+    }
+
     // Lọc nội dung cấm hoặc AI
     const filterService = require('./filterService');
-    await filterService.checkContent(text);
+    const groupBannedWords = group ? (group.bannedWords || []) : [];
+
+    const textCheck = await filterService.checkContentWithGroup(text, groupBannedWords);
+    let codeCheck = { isViolation: false };
     if (codeSnippet) {
-      await filterService.checkContent(codeSnippet);
+      codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+    }
+
+    if (textCheck.isViolation || codeCheck.isViolation) {
+      if (groupId) {
+        // Trong nhóm học tập: chuyển trạng thái thành 'pending' để admin nhóm duyệt
+        status = 'pending';
+        isPendingDueToBannedWord = true;
+      } else {
+        // Ngoài nhóm: chặn hoàn toàn
+        const violationWord = textCheck.word || codeCheck.word || '';
+        const violationReason = textCheck.reason || codeCheck.reason || '';
+        const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     const user = await User.findById(userId).select('-password');
@@ -18,18 +45,6 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
       const error = new Error('Người dùng không tồn tại');
       error.statusCode = 404;
       throw error;
-    }
-
-    let status = 'approved';
-    if (groupId) {
-      const group = await Group.findById(groupId);
-      if (group) {
-        const isAdmin = group.admin.toString() === userId.toString();
-        const isMod = group.moderators && group.moderators.some(m => m.toString() === userId.toString());
-        if (!isAdmin && !isMod) {
-          status = 'pending';
-        }
-      }
     }
 
     const newPost = new Post({
@@ -47,6 +62,26 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
 
     let post = await newPost.save();
     post = await Post.findById(post._id).populate('user', 'name avatar reputation');
+
+    // Nếu bài đăng ở trạng thái pending trong nhóm, gửi thông báo socket tới Admin/Mod nhóm
+    if (status === 'pending' && group) {
+      const socketIO = require('../utils/socketIO');
+      try {
+        const io = socketIO.getIO();
+        const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+        admins.forEach(adminId => {
+          io.to(adminId).emit('new_pending_post_alert', {
+            groupId: group._id,
+            groupName: group.name,
+            postId: post._id,
+            message: `Có bài viết mới chứa từ khóa cấm cần duyệt trong nhóm học tập "${group.name}".`
+          });
+        });
+      } catch (err) {
+        console.error('Lỗi gửi socket pending post alert:', err.message);
+      }
+    }
+
     return post;
   } catch (error) {
     throw error;
@@ -563,13 +598,6 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
       throw error;
     }
 
-    // Lọc nội dung cấm hoặc AI
-    const filterService = require('./filterService');
-    await filterService.checkContent(normalizedText);
-    if (codeSnippet) {
-      await filterService.checkContent(codeSnippet);
-    }
-
     const user = await User.findById(userId).select('-password');
 
     if (!user) {
@@ -583,6 +611,30 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
     if (!post) {
       const error = new Error('Bài viết không tồn tại');
       error.statusCode = 404;
+      throw error;
+    }
+
+    // Lọc nội dung cấm hoặc AI dựa trên nhóm học tập của bài viết
+    let groupBannedWords = [];
+    if (post.group) {
+      const group = await Group.findById(post.group);
+      if (group) {
+        groupBannedWords = group.bannedWords || [];
+      }
+    }
+
+    const filterService = require('./filterService');
+    const textCheck = await filterService.checkContentWithGroup(normalizedText, groupBannedWords);
+    let codeCheck = { isViolation: false };
+    if (codeSnippet) {
+      codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+    }
+
+    if (textCheck.isViolation || codeCheck.isViolation) {
+      const violationWord = textCheck.word || codeCheck.word || '';
+      const violationReason = textCheck.reason || codeCheck.reason || '';
+      const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+      error.statusCode = 400;
       throw error;
     }
 
