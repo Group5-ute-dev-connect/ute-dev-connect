@@ -1,6 +1,7 @@
 const Post = require('../models/Post');
 const User = require('../models/User');
 const Group = require('../models/Group');
+const PostView = require('../models/PostView');
 
 const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
   try {
@@ -52,9 +53,9 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
   }
 };
 
-const getPostById = async (postId, currentUserId = null) => {
+const getPostById = async (postId, currentUserId = null, clientIp = null) => {
   try {
-    const post = await Post.findByIdAndUpdate(postId, { $inc: { views: 1 } }, { new: true })
+    const post = await Post.findById(postId)
       .populate('user', 'name avatar reputation')
       .populate('comments.user', 'name avatar reputation');
 
@@ -110,6 +111,31 @@ const getPostById = async (postId, currentUserId = null) => {
       }
     }
 
+    // Cooldown check for view tracking (15 minutes)
+    if (clientIp || currentUserId) {
+      const cooldownPeriod = new Date(Date.now() - 15 * 60 * 1000);
+      let query = { post: postId, date: { $gte: cooldownPeriod } };
+      if (currentUserId) {
+        query.user = currentUserId;
+      } else if (clientIp) {
+        query.ip = clientIp;
+      }
+
+      const hasViewed = await PostView.findOne(query);
+      if (!hasViewed) {
+        const newView = new PostView({
+          post: postId,
+          user: currentUserId || null,
+          ip: clientIp || '127.0.0.1'
+        });
+        await newView.save();
+
+        // Increment cached views on Post
+        post.views = (post.views || 0) + 1;
+        await Post.findByIdAndUpdate(postId, { $inc: { views: 1 } });
+      }
+    }
+
     return post;
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -122,7 +148,7 @@ const getPostById = async (postId, currentUserId = null) => {
   }
 };
 
-const getAllPosts = async (page = 1, limit = 5, currentUserId = null, filterType = 'latest') => {
+const getAllPosts = async (page = 1, limit = 5, currentUserId = null, filterType = 'latest', timeframe = '7d') => {
   try {
     const skip = (page - 1) * limit;
 
@@ -182,26 +208,84 @@ const getAllPosts = async (page = 1, limit = 5, currentUserId = null, filterType
 
     let posts;
     if (filterType === 'trending') {
-      // Sắp xếp xu hướng: ưu tiên views, commentsCount, likesCount, date
-      posts = await Post.aggregate([
-        { $match: filter },
-        {
-          $addFields: {
-            likesCount: { $size: { $ifNull: ['$likes', []] } },
-            commentsCount: { $size: { $ifNull: ['$comments', []] } }
-          }
-        },
-        {
-          $sort: {
-            views: -1,
-            commentsCount: -1,
-            likesCount: -1,
-            date: -1
-          }
-        },
-        { $skip: skip },
-        { $limit: limit }
-      ]);
+      if (timeframe === 'all') {
+        // Sắp xếp xu hướng Tất cả thời gian: dùng trực tiếp trường views trên Post (bao gồm cả các view cũ)
+        posts = await Post.aggregate([
+          { $match: filter },
+          {
+            $addFields: {
+              recentViewsCount: { $ifNull: ['$views', 0] },
+              likesCount: { $size: { $ifNull: ['$likes', []] } },
+              commentsCount: { $size: { $ifNull: ['$comments', []] } }
+            }
+          },
+          {
+            $sort: {
+              recentViewsCount: -1,
+              commentsCount: -1,
+              likesCount: -1,
+              date: -1
+            }
+          },
+          { $skip: skip },
+          { $limit: limit }
+        ]);
+      } else {
+        // Xác định thời điểm bắt đầu lọc views cho các khoảng thời gian cụ thể
+        let startDate = new Date(0);
+        const now = Date.now();
+        if (timeframe === '24h') {
+          startDate = new Date(now - 24 * 60 * 60 * 1000);
+        } else if (timeframe === '7d') {
+          startDate = new Date(now - 7 * 24 * 60 * 60 * 1000);
+        } else if (timeframe === '30d') {
+          startDate = new Date(now - 30 * 24 * 60 * 60 * 1000);
+        }
+
+        // Sắp xếp xu hướng: ưu tiên views trong timeframe, commentsCount, likesCount, date
+        posts = await Post.aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: 'postviews',
+              let: { postId: '$_id' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$post', '$$postId'] },
+                        { $gte: ['$date', startDate] }
+                      ]
+                    }
+                  }
+                },
+                { $count: 'count' }
+              ],
+              as: 'recentViews'
+            }
+          },
+          {
+            $addFields: {
+              recentViewsCount: {
+                $ifNull: [ { $arrayElemAt: ['$recentViews.count', 0] }, 0 ]
+              },
+              likesCount: { $size: { $ifNull: ['$likes', []] } },
+              commentsCount: { $size: { $ifNull: ['$comments', []] } }
+            }
+          },
+          {
+            $sort: {
+              recentViewsCount: -1,
+              commentsCount: -1,
+              likesCount: -1,
+              date: -1
+            }
+          },
+          { $skip: skip },
+          { $limit: limit }
+        ]);
+      }
       await Post.populate(posts, { path: 'user', select: 'name avatar reputation' });
     } else {
       // 'latest' hoặc 'friends'
