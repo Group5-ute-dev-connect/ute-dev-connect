@@ -664,15 +664,6 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
 // Cập nhật bài viết
 const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLanguage, visibility) => {
   try {
-    // Lọc nội dung cấm hoặc AI
-    const filterService = require('./filterService');
-    if (text !== undefined) {
-      await filterService.checkContent(text);
-    }
-    if (codeSnippet !== undefined) {
-      await filterService.checkContent(codeSnippet);
-    }
-
     const post = await Post.findById(postId);
     if (!post || post.isDeleted) {
       const error = new Error('Bài viết không tồn tại');
@@ -685,14 +676,63 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
       throw error;
     }
 
+    let status = 'approved';
+    const filterService = require('./filterService');
+
+    // Nếu bài viết thuộc nhóm học tập, kiểm tra bộ lọc nhóm + bộ lọc hệ thống
+    if (post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      
+      const checkText = text !== undefined ? text : post.text;
+      const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+      
+      const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
+      const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
+      
+      if (checkResult.isViolation || snippetCheckResult.isViolation) {
+        status = 'pending';
+      }
+    } else {
+      // Bài viết công khai ngoài nhóm, nếu dính từ cấm hệ thống thì chặn lỗi 400 như cũ
+      if (text !== undefined) {
+        await filterService.checkContent(text);
+      }
+      if (codeSnippet !== undefined) {
+        await filterService.checkContent(codeSnippet);
+      }
+    }
+
     post.text = text !== undefined ? text : post.text;
     post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
     post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
     post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
     post.visibility = visibility !== undefined ? visibility : post.visibility;
     
+    if (post.group) {
+      post.status = status;
+    }
+    
     await post.save();
     await post.populate('user', 'name avatar reputation');
+
+    // Nếu chuyển sang pending, tạo thông báo cho Admin/Mod nhóm
+    if (status === 'pending' && post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      if (group) {
+        const notificationService = require('./notificationService');
+        const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+        for (const adminId of admins) {
+          try {
+            await notificationService.createNotification(adminId, userId, 'post_pending', post._id);
+          } catch (err) {
+            console.error('Lỗi tạo thông báo pending cho Admin/Mod nhóm khi sửa bài:', err.message);
+          }
+        }
+      }
+    }
+
     return post;
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -714,7 +754,22 @@ const deletePost = async (postId, userId) => {
       throw error;
     }
     
-    if (post.user.toString() !== userId.toString()) {
+    let hasDeletePermission = post.user.toString() === userId.toString();
+    
+    // Nếu là bài viết trong nhóm, cho phép Admin/Mod nhóm xóa bài viết đó
+    if (!hasDeletePermission && post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      if (group) {
+        const isAdmin = group.admin.toString() === userId.toString();
+        const isMod = group.moderators && group.moderators.some(m => m.toString() === userId.toString());
+        if (isAdmin || isMod) {
+          hasDeletePermission = true;
+        }
+      }
+    }
+
+    if (!hasDeletePermission) {
       const error = new Error('Người dùng không có quyền xóa bài viết này');
       error.statusCode = 401;
       throw error;
