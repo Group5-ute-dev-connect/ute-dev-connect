@@ -62,6 +62,13 @@ const PostSchema = new Schema({
     type: Boolean,
     default: false
   },
+  pendingEdit: {
+    text: { type: String },
+    codeSnippet: { type: String },
+    codeLanguage: { type: String },
+    isQuestion: { type: Boolean },
+    status: { type: String, enum: ['pending', 'approved', 'rejected'], default: null }
+  },
   likes: [
     {
       user: {

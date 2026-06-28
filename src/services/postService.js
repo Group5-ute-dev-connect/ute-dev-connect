@@ -703,15 +703,41 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
       }
     }
 
-    post.text = text !== undefined ? text : post.text;
-    post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
-    post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
-    post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
-    post.visibility = visibility !== undefined ? visibility : post.visibility;
-    
-    if (post.group) {
-      post.status = status;
+    const isAlreadyApproved = post.status === 'approved';
+
+    if (status === 'pending') {
+      if (isAlreadyApproved) {
+        // Lưu chỉnh sửa vào pendingEdit, giữ nguyên nội dung bài đăng đang hiện hữu
+        post.pendingEdit = {
+          text: text !== undefined ? text : post.text,
+          codeSnippet: codeSnippet !== undefined ? codeSnippet : post.codeSnippet,
+          codeLanguage: codeLanguage !== undefined ? codeLanguage : post.codeLanguage,
+          isQuestion: isQuestion !== undefined ? isQuestion : post.isQuestion,
+          status: 'pending'
+        };
+      } else {
+        // Bài viết mới chưa duyệt, ghi đè trực tiếp
+        post.text = text !== undefined ? text : post.text;
+        post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
+        post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+        post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+        post.status = 'pending';
+      }
+    } else {
+      // Nội dung sửa đổi hợp lệ, lưu đè trực tiếp và xóa pendingEdit cũ (nếu có)
+      post.text = text !== undefined ? text : post.text;
+      post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
+      post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+      post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+      post.pendingEdit = undefined;
+      
+      // Nếu bài viết thuộc nhóm, chuyển trạng thái về approved
+      if (post.group) {
+        post.status = 'approved';
+      }
     }
+    
+    post.visibility = visibility !== undefined ? visibility : post.visibility;
     
     await post.save();
     await post.populate('user', 'name avatar reputation');

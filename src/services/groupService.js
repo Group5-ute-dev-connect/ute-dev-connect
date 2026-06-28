@@ -276,6 +276,7 @@ const getGroupFeed = async (groupId, userId, page = 1, limit = 10) => {
 
   const filter = {
     group: groupId,
+    isDeleted: { $ne: true },
     $or: [
       { status: 'approved' },
       { user: userId, status: 'pending' }
@@ -503,11 +504,29 @@ const getPendingPosts = async (groupId, userId) => {
     throw err;
   }
 
-  const posts = await Post.find({ group: groupId, status: 'pending' })
+  const posts = await Post.find({
+    group: groupId,
+    isDeleted: { $ne: true },
+    $or: [
+      { status: 'pending' },
+      { 'pendingEdit.status': 'pending' }
+    ]
+  })
     .populate('user', 'name avatar reputation')
     .populate('comments.user', 'name avatar reputation')
     .sort({ date: -1 });
-  return posts;
+
+  return posts.map(post => {
+    const postObj = post.toObject();
+    if (postObj.pendingEdit && postObj.pendingEdit.status === 'pending') {
+      postObj.isEditApproval = true;
+      postObj.text = postObj.pendingEdit.text;
+      postObj.codeSnippet = postObj.pendingEdit.codeSnippet;
+      postObj.codeLanguage = postObj.pendingEdit.codeLanguage;
+      postObj.isQuestion = postObj.pendingEdit.isQuestion;
+    }
+    return postObj;
+  });
 };
 
 /**
@@ -535,7 +554,17 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
   }
 
   if (status === 'approved') {
-    post.status = 'approved';
+    if (post.pendingEdit && post.pendingEdit.status === 'pending') {
+      // Áp dụng nội dung chỉnh sửa mới
+      post.text = post.pendingEdit.text;
+      post.codeSnippet = post.pendingEdit.codeSnippet;
+      post.codeLanguage = post.pendingEdit.codeLanguage;
+      post.isQuestion = post.pendingEdit.isQuestion;
+      post.pendingEdit = undefined; // Xóa thông tin chỉnh sửa chờ duyệt
+    } else {
+      // Bài viết mới hoàn toàn, duyệt public bài đăng
+      post.status = 'approved';
+    }
     await post.save();
 
     // Tạo thông báo duyệt thành công cho tác giả bài viết
@@ -546,7 +575,6 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
       console.error('Lỗi tạo thông báo duyệt bài viết:', err.message);
     }
   } else if (status === 'rejected') {
-    // Tạo thông báo bị từ chối cho tác giả bài viết trước khi xóa
     const notificationService = require('./notificationService');
     try {
       await notificationService.createNotification(post.user, userId, 'post_rejected', post._id);
@@ -554,7 +582,14 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
       console.error('Lỗi tạo thông báo từ chối bài viết:', err.message);
     }
 
-    await post.deleteOne();
+    if (post.pendingEdit && post.pendingEdit.status === 'pending') {
+      // Từ chối chỉnh sửa ➔ Hủy bỏ thông tin sửa, giữ nguyên bài đăng cũ đang live
+      post.pendingEdit = undefined;
+      await post.save();
+    } else {
+      // Từ chối bài viết mới hoàn toàn ➔ Xóa bài viết khỏi cơ sở dữ liệu
+      await post.deleteOne();
+    }
   } else {
     const err = new Error('Trạng thái duyệt không hợp lệ');
     err.statusCode = 400;
