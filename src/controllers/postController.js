@@ -88,8 +88,9 @@ const getAllPosts = async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 5;
+    const filter = req.query.filter || 'latest';
 
-    const result = await postService.getAllPosts(page, limit, getUserId(req));
+    const result = await postService.getAllPosts(page, limit, getUserId(req), filter);
 
     res.status(200).json({
       success: true,
@@ -98,6 +99,7 @@ const getAllPosts = async (req, res) => {
       total: result.total,
       page,
       limit,
+      filter,
     });
   } catch (err) {
     console.error(err.message);

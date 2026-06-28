@@ -54,7 +54,7 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
 
 const getPostById = async (postId, currentUserId = null) => {
   try {
-    const post = await Post.findById(postId)
+    const post = await Post.findByIdAndUpdate(postId, { $inc: { views: 1 } }, { new: true })
       .populate('user', 'name avatar reputation')
       .populate('comments.user', 'name avatar reputation');
 
@@ -122,7 +122,7 @@ const getPostById = async (postId, currentUserId = null) => {
   }
 };
 
-const getAllPosts = async (page = 1, limit = 5, currentUserId = null) => {
+const getAllPosts = async (page = 1, limit = 5, currentUserId = null, filterType = 'latest') => {
   try {
     const skip = (page - 1) * limit;
 
@@ -132,12 +132,15 @@ const getAllPosts = async (page = 1, limit = 5, currentUserId = null) => {
       isHidden: { $ne: true }
     };
 
+    let followingIds = [];
+    let friendIds = [];
+
     if (currentUserId) {
       const user = await User.findById(currentUserId);
       if (user) {
-        const followingIds = user.following.map(f => f.user);
+        followingIds = user.following.map(f => f.user);
         const followerIds = user.followers.map(f => f.user);
-        const friendIds = followingIds.filter(id => 
+        friendIds = followingIds.filter(id => 
           followerIds.some(fId => fId.toString() === id.toString())
         );
 
@@ -158,11 +161,56 @@ const getAllPosts = async (page = 1, limit = 5, currentUserId = null) => {
       ];
     }
 
-    const posts = await Post.find(filter)
-      .populate('user', 'name avatar reputation')
-      .sort({ date: -1 })
-      .skip(skip)
-      .limit(limit);
+    // Tinh chỉnh bộ lọc theo loại (friends)
+    if (filterType === 'friends') {
+      if (!currentUserId) {
+        return { posts: [], hasMore: false, total: 0 };
+      }
+      filter = {
+        group: null,
+        isDeleted: { $ne: true },
+        isHidden: { $ne: true },
+        user: { $in: friendIds },
+        $or: [
+          { visibility: 'public' },
+          { visibility: { $exists: false } },
+          { visibility: 'friends' },
+          { visibility: 'followers' }
+        ]
+      };
+    }
+
+    let posts;
+    if (filterType === 'trending') {
+      // Sắp xếp xu hướng: ưu tiên views, commentsCount, likesCount, date
+      posts = await Post.aggregate([
+        { $match: filter },
+        {
+          $addFields: {
+            likesCount: { $size: { $ifNull: ['$likes', []] } },
+            commentsCount: { $size: { $ifNull: ['$comments', []] } }
+          }
+        },
+        {
+          $sort: {
+            views: -1,
+            commentsCount: -1,
+            likesCount: -1,
+            date: -1
+          }
+        },
+        { $skip: skip },
+        { $limit: limit }
+      ]);
+      await Post.populate(posts, { path: 'user', select: 'name avatar reputation' });
+    } else {
+      // 'latest' hoặc 'friends'
+      posts = await Post.find(filter)
+        .populate('user', 'name avatar reputation')
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(limit);
+    }
 
     const total = await Post.countDocuments(filter);
     const hasMore = total > skip + posts.length;
