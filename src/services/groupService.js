@@ -679,6 +679,52 @@ const deleteGroupFilter = async (groupId, userId, word) => {
   return group.bannedWords;
 };
 
+const kickMember = async (groupId, adminId, targetUserId) => {
+  const group = await getActiveGroupOrThrow(groupId);
+
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const isAdmin = group.admin.toString() === adminId.toString();
+  if (!isAdmin) {
+    const err = new Error('Chỉ Admin nhóm mới có quyền xóa thành viên');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  if (adminId.toString() === targetUserId.toString()) {
+    const err = new Error('Admin không thể tự xóa chính mình khỏi nhóm. Hãy sử dụng tính năng chuyển quyền admin.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const isTargetMember = group.members.some(
+    (m) => m.user && m.user.toString() === targetUserId.toString()
+  );
+  if (!isTargetMember) {
+    const err = new Error('Người dùng này không phải thành viên của nhóm');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  group.members = group.members.filter(
+    (m) => m.user && m.user.toString() !== targetUserId.toString()
+  );
+
+  if (Array.isArray(group.moderators)) {
+    group.moderators = group.moderators.filter(
+      (moderator) => moderator.toString() !== targetUserId.toString()
+    );
+  }
+
+  await group.save();
+
+  return { message: 'Đã xóa thành viên khỏi nhóm thành công', membersCount: group.members.length };
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -701,4 +747,5 @@ module.exports = {
   getGroupFilters,
   addGroupFilter,
   deleteGroupFilter,
+  kickMember,
 };

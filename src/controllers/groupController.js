@@ -381,6 +381,19 @@ const deleteGroupFilter = async (req, res) => {
   }
 };
 
+const kickMember = async (req, res) => {
+  try {
+    const adminId = getUserId(req);
+    const result = await groupService.kickMember(req.params.id, adminId, req.params.userId);
+
+    res.status(200).json({ success: true, message: result.message, membersCount: result.membersCount });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -401,4 +414,5 @@ module.exports = {
   getGroupFilters,
   addGroupFilter,
   deleteGroupFilter,
+  kickMember,
 };

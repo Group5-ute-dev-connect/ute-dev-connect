@@ -18,10 +18,18 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
     const filterService = require('./filterService');
     const groupBannedWords = group ? (group.bannedWords || []) : [];
 
-    const textCheck = await filterService.checkContentWithGroup(text, groupBannedWords);
+    // Kiểm tra xem người đăng có phải Admin hoặc Mod nhóm không, nếu có thì tự động duyệt thông qua
+    const isAdminOrMod = group && (group.admin.toString() === userId.toString() ||
+                         (group.moderators && group.moderators.some(m => m.toString() === userId.toString())));
+
+    let textCheck = { isViolation: false };
     let codeCheck = { isViolation: false };
-    if (codeSnippet) {
-      codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+
+    if (!isAdminOrMod) {
+      textCheck = await filterService.checkContentWithGroup(text, groupBannedWords);
+      if (codeSnippet) {
+        codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+      }
     }
 
     if (textCheck.isViolation || codeCheck.isViolation) {
@@ -684,14 +692,21 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
       const Group = require('../models/Group');
       const group = await Group.findById(post.group);
       
-      const checkText = text !== undefined ? text : post.text;
-      const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+      const isAdminOrMod = group && (group.admin.toString() === userId.toString() ||
+                           (group.moderators && group.moderators.some(m => m.toString() === userId.toString())));
       
-      const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
-      const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
-      
-      if (checkResult.isViolation || snippetCheckResult.isViolation) {
-        status = 'pending';
+      if (isAdminOrMod) {
+        status = 'approved';
+      } else {
+        const checkText = text !== undefined ? text : post.text;
+        const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+        
+        const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
+        const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
+        
+        if (checkResult.isViolation || snippetCheckResult.isViolation) {
+          status = 'pending';
+        }
       }
     } else {
       // Bài viết công khai ngoài nhóm, nếu dính từ cấm hệ thống thì chặn lỗi 400 như cũ

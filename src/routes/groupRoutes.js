@@ -156,4 +156,9 @@ router.post('/:id/filters', verifyToken, groupController.addGroupFilter);
 // @access  Private
 router.delete('/:id/filters/:word', verifyToken, groupController.deleteGroupFilter);
 
+// @route   DELETE /api/groups/:id/members/:userId
+// @desc    Xóa thành viên khỏi nhóm (chỉ Admin nhóm)
+// @access  Private
+router.delete('/:id/members/:userId', verifyToken, groupController.kickMember);
+
 module.exports = router;
