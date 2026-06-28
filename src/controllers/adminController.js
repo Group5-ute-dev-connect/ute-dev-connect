@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Post = require('../models/Post');
 const Group = require('../models/Group');
 const Filter = require('../models/Filter');
+const Profile = require('../models/Profile');
 
 // Helper to fill in dates with 0 counts for chart rendering
 const fillMissingDates = (statsArray, startDate, endDate) => {
@@ -160,6 +161,50 @@ const getSystemStats = async (req, res) => {
       ,{ $project: { text: 1, views: 1, likesCount: 1, commentsCount: 1, userName: '$postUser.name', userAvatar: '$postUser.avatar' } }
     ]);
 
+    // 5. Advanced statistics
+    // Faculty distribution
+    const facultyDistribution = await Profile.aggregate([
+      { $match: { faculty: { $exists: true, $ne: '' } } }
+      ,{
+        $group: {
+          _id: '$faculty',
+          count: { $sum: 1 }
+        }
+      }
+      ,{ $sort: { count: -1 } }
+    ]);
+
+    // Top 10 skills
+    const skillsDistribution = await Profile.aggregate([
+      { $match: { skills: { $exists: true, $ne: null } } }
+      ,{ $unwind: '$skills' }
+      ,{
+        $group: {
+          _id: { $toLower: { $trim: { input: '$skills' } } },
+          count: { $sum: 1 }
+        }
+      }
+      ,{ $sort: { count: -1 } }
+      ,{ $limit: 10 }
+    ]);
+
+    // Top 10 coding languages in posts
+    const languagesDistribution = await Post.aggregate([
+      { $match: { isDeleted: { $ne: true }, codeLanguage: { $exists: true, $ne: '' } } }
+      ,{
+        $group: {
+          _id: '$codeLanguage',
+          count: { $sum: 1 }
+        }
+      }
+      ,{ $sort: { count: -1 } }
+      ,{ $limit: 10 }
+    ]);
+
+    // Q&A Stats
+    const totalQuestions = await Post.countDocuments({ isQuestion: true, isDeleted: { $ne: true } });
+    const solvedQuestions = await Post.countDocuments({ isQuestion: true, acceptedAnswer: { $ne: null }, isDeleted: { $ne: true } });
+
     res.status(200).json({
       success: true,
       data: {
@@ -180,6 +225,15 @@ const getSystemStats = async (req, res) => {
           topUsers,
           topGroups,
           topPosts
+        },
+        advanced: {
+          facultyDistribution,
+          skillsDistribution,
+          languagesDistribution,
+          qaStats: {
+            totalQuestions,
+            solvedQuestions
+          }
         }
       }
     });
