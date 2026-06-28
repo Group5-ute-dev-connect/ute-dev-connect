@@ -26,6 +26,7 @@ app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/groups', require('./routes/groupRoutes'));
 app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/filters', require('./routes/filterRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
 
 const http = require('http');
 const socketIO = require('./utils/socketIO');
