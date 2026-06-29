@@ -8,6 +8,7 @@ const { profileLimiter } = require('../middlewares/rateLimiter');
 
 // 2. Import controller
 const profileController = require('../controllers/profileController');
+const upload = require('../middlewares/uploadMiddleware');
 
 // ==========================================
 // CÁC ROUTE CỦA NHÓM (Từ nhánh develop)
@@ -18,6 +19,16 @@ const profileController = require('../controllers/profileController');
 // @access  Private
 // FIX LỖI: Đổi `authMiddleware` thành `verifyToken`
 router.put('/profile', verifyToken, profileLimiter, validateEditProfile, profileController.editProfile);
+
+// @route   PUT /api/profile/avatar
+// @desc    Cập nhật ảnh đại diện của user (Cloudinary hoặc Local)
+// @access  Private
+router.put('/profile/avatar', verifyToken, upload.single('avatar'), profileController.updateAvatar);
+
+// @route   DELETE /api/profile/avatar
+// @desc    Xóa ảnh đại diện của user (quay về mặc định)
+// @access  Private
+router.delete('/profile/avatar', verifyToken, profileController.deleteAvatar);
 
 // @route   GET /api/profile/me
 // @desc    Lấy hồ sơ của người dùng hiện tại

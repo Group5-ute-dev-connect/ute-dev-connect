@@ -1,6 +1,9 @@
 const profileService = require('../services/profileService');
 const User = require('../models/User');
+const Post = require('../models/Post');
 const notificationService = require('../services/notificationService');
+const { uploadToCloudinary } = require('../utils/cloudinary');
+const fs = require('fs');
 
 /**
  * Controller: Cập nhật hoặc tạo mới hồ sơ người dùng (Edit Profile)
@@ -277,6 +280,122 @@ const getFollowing = async (req, res) => {
     }
 };
 
+/**
+ * Controller: Cập nhật ảnh đại diện của user (Cloudinary hoặc Local Fallback)
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ */
+const updateAvatar = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ msg: 'Vui lòng chọn hình ảnh để tải lên' });
+        }
+
+        const userId = req.user.id;
+        let avatarUrl = '';
+
+        // Tải ảnh lên Cloudinary
+        try {
+            const cloudinaryUrl = await uploadToCloudinary(req.file.path, 'avatars');
+            if (cloudinaryUrl) {
+                avatarUrl = cloudinaryUrl;
+            } else {
+                // Fallback: Nếu uploadToCloudinary trả về null (do không có cấu hình Cloudinary), dùng ảnh lưu local
+                avatarUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+            }
+        } catch (uploadError) {
+            console.error('Lỗi khi tải ảnh lên Cloudinary, chuyển sang dùng Local Fallback...', uploadError);
+            avatarUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+        }
+
+        // Cập nhật trường avatar trong bảng User
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { avatar: avatarUrl },
+            { new: true }
+        ).select('-password');
+
+        if (!user) {
+            return res.status(404).json({ msg: 'Không tìm thấy người dùng' });
+        }
+
+        // ĐỒNG BỘ: Cập nhật ảnh đại diện trong tất cả bài đăng của user này
+        await Post.updateMany(
+            { user: userId },
+            { $set: { avatar: avatarUrl } }
+        );
+
+        // ĐỒNG BỘ: Cập nhật ảnh đại diện trong tất cả bình luận của user này
+        await Post.updateMany(
+            { "comments.user": userId },
+            { $set: { "comments.$[elem].avatar": avatarUrl } },
+            { arrayFilters: [{ "elem.user": userId }] }
+        );
+
+        return res.status(200).json({
+            msg: 'Cập nhật ảnh đại diện thành công',
+            avatar: user.avatar,
+            user
+        });
+    } catch (error) {
+        console.error('Lỗi ở updateAvatar controller:', error.message);
+        // Dọn dẹp file tạm trên local nếu có lỗi xảy ra và file vẫn tồn tại
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            try {
+                fs.unlinkSync(req.file.path);
+            } catch (err) {
+                console.error('Lỗi khi xóa file tạm:', err);
+            }
+        }
+        return res.status(500).json({ msg: 'Lỗi máy chủ (Server Error)' });
+    }
+};
+
+/**
+ * Controller: Xóa ảnh đại diện của user (quay về mặc định)
+ * @param {Object} req - Request object
+ * @param {Object} res - Response object
+ */
+const deleteAvatar = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const defaultAvatarUrl = '';
+
+        // Cập nhật trường avatar trong bảng User thành rỗng
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { avatar: defaultAvatarUrl },
+            { new: true }
+        ).select('-password');
+
+        if (!user) {
+            return res.status(404).json({ msg: 'Không tìm thấy người dùng' });
+        }
+
+        // ĐỒNG BỘ: Cập nhật ảnh đại diện trong tất cả bài đăng của user này
+        await Post.updateMany(
+            { user: userId },
+            { $set: { avatar: defaultAvatarUrl } }
+        );
+
+        // ĐỒNG BỘ: Cập nhật ảnh đại diện trong tất cả bình luận của user này
+        await Post.updateMany(
+            { "comments.user": userId },
+            { $set: { "comments.$[elem].avatar": defaultAvatarUrl } },
+            { arrayFilters: [{ "elem.user": userId }] }
+        );
+
+        return res.status(200).json({
+            msg: 'Xóa ảnh đại diện thành công',
+            avatar: user.avatar,
+            user
+        });
+    } catch (error) {
+        console.error('Lỗi ở deleteAvatar controller:', error.message);
+        return res.status(500).json({ msg: 'Lỗi máy chủ (Server Error)' });
+    }
+};
+
 module.exports = {
     editProfile,
     getCurrentProfile,
@@ -286,6 +405,8 @@ module.exports = {
     followUser,
     unfollowUser,
     getFollowers,
-    getFollowing
+    getFollowing,
+    updateAvatar,
+    deleteAvatar
 };
 

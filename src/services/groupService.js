@@ -110,7 +110,7 @@ const createGroup = async (userId, { name, description, tags }) => {
 /**
  * Lấy tất cả nhóm đang hoạt động (có phân trang + tìm kiếm tên)
  */
-const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
+const getAllGroups = async (page = 1, limit = 10, keyword = '', userId = null) => {
   const skip = (page - 1) * limit;
   const filter = { isActive: true };
 
@@ -122,7 +122,6 @@ const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
   }
 
   const groups = await Group.find(filter)
-    .select('-joinRequests')
     .populate('admin', 'name avatar')
     .sort({ date: -1 })
     .skip(skip)
@@ -131,7 +130,26 @@ const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
   const total = await Group.countDocuments(filter);
   const hasMore = total > skip + groups.length;
 
-  return { groups, total, hasMore };
+  const mappedGroups = groups.map((g) => {
+    const groupObj = g.toObject();
+    const latestRequest = userId ? findLatestJoinRequest(g, userId) : null;
+    const joinRequestStatus = latestRequest ? latestRequest.status : '';
+    const hasPendingJoinRequest = joinRequestStatus === 'pending';
+
+    delete groupObj.joinRequests;
+
+    return {
+      ...groupObj,
+      isMember: userId ? isMember(g, userId) : false,
+      isAdmin: userId ? isGroupAdmin(g, userId) : false,
+      isMod: userId ? isGroupModerator(g, userId) : false,
+      membersCount: g.members?.length || 0,
+      joinRequestStatus,
+      hasPendingJoinRequest,
+    };
+  });
+
+  return { groups: mappedGroups, total, hasMore };
 };
 
 /**
@@ -139,7 +157,6 @@ const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
  */
 const getGroupById = async (groupId, userId) => {
   const group = await Group.findOne({ _id: groupId, isActive: true })
-    .select('-joinRequests')
     .populate('admin', 'name avatar')
     .populate('members.user', 'name avatar')
     .populate('moderators', 'name avatar');
@@ -150,12 +167,23 @@ const getGroupById = async (groupId, userId) => {
     throw err;
   }
 
+  const latestRequest = userId ? findLatestJoinRequest(group, userId) : null;
+  const joinRequestStatus = latestRequest ? latestRequest.status : '';
+  const hasPendingJoinRequest = joinRequestStatus === 'pending';
+
+  const groupObj = group.toObject();
+  delete groupObj.joinRequests;
+
   return {
-    ...group.toObject(),
+    ...groupObj,
+    privacyType: group.privacyType || 'private',
+    postModerationType: group.postModerationType || 'auto',
     isMember: userId ? isMember(group, userId) : false,
     isAdmin: userId ? isGroupAdmin(group, userId) : false,
     isMod: userId ? isGroupModerator(group, userId) : false,
     membersCount: group.members.length,
+    joinRequestStatus,
+    hasPendingJoinRequest,
   };
 };
 
@@ -164,6 +192,10 @@ const getGroupById = async (groupId, userId) => {
  */
 const joinGroup = async (groupId, userId) => {
   const group = await getActiveGroupOrThrow(groupId);
+  console.log('--- DEBUG joinGroup ---');
+  console.log('Group Name:', group.name);
+  console.log('Group Privacy:', group.privacyType);
+  console.log('User ID:', userId);
 
   if (!group) {
     const err = new Error('Nhóm không tồn tại');
@@ -175,6 +207,17 @@ const joinGroup = async (groupId, userId) => {
     const err = new Error('Bạn đã là thành viên của nhóm này');
     err.statusCode = 400;
     throw err;
+  }
+
+  // Nếu là nhóm cộng đồng, cho phép tham gia trực tiếp không cần duyệt
+  if (group.privacyType === 'public') {
+    group.members.push({ user: userId });
+    await group.save();
+    return {
+      message: 'Tham gia nhóm thành công',
+      status: 'approved',
+      membersCount: group.members.length
+    };
   }
 
   const pendingRequest = findPendingJoinRequest(group, userId);
@@ -276,6 +319,7 @@ const getGroupFeed = async (groupId, userId, page = 1, limit = 10) => {
 
   const filter = {
     group: groupId,
+    isDeleted: { $ne: true },
     $or: [
       { status: 'approved' },
       { user: userId, status: 'pending' }
@@ -503,11 +547,29 @@ const getPendingPosts = async (groupId, userId) => {
     throw err;
   }
 
-  const posts = await Post.find({ group: groupId, status: 'pending' })
+  const posts = await Post.find({
+    group: groupId,
+    isDeleted: { $ne: true },
+    $or: [
+      { status: 'pending' },
+      { 'pendingEdit.status': 'pending' }
+    ]
+  })
     .populate('user', 'name avatar reputation')
     .populate('comments.user', 'name avatar reputation')
     .sort({ date: -1 });
-  return posts;
+
+  return posts.map(post => {
+    const postObj = post.toObject();
+    if (postObj.pendingEdit && postObj.pendingEdit.status === 'pending') {
+      postObj.isEditApproval = true;
+      postObj.text = postObj.pendingEdit.text;
+      postObj.codeSnippet = postObj.pendingEdit.codeSnippet;
+      postObj.codeLanguage = postObj.pendingEdit.codeLanguage;
+      postObj.isQuestion = postObj.pendingEdit.isQuestion;
+    }
+    return postObj;
+  });
 };
 
 /**
@@ -535,10 +597,42 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
   }
 
   if (status === 'approved') {
-    post.status = 'approved';
+    if (post.pendingEdit && post.pendingEdit.status === 'pending') {
+      // Áp dụng nội dung chỉnh sửa mới
+      post.text = post.pendingEdit.text;
+      post.codeSnippet = post.pendingEdit.codeSnippet;
+      post.codeLanguage = post.pendingEdit.codeLanguage;
+      post.isQuestion = post.pendingEdit.isQuestion;
+      post.pendingEdit = undefined; // Xóa thông tin chỉnh sửa chờ duyệt
+    } else {
+      // Bài viết mới hoàn toàn, duyệt public bài đăng
+      post.status = 'approved';
+    }
     await post.save();
+
+    // Tạo thông báo duyệt thành công cho tác giả bài viết
+    const notificationService = require('./notificationService');
+    try {
+      await notificationService.createNotification(post.user, userId, 'post_approved', post._id);
+    } catch (err) {
+      console.error('Lỗi tạo thông báo duyệt bài viết:', err.message);
+    }
   } else if (status === 'rejected') {
-    await post.deleteOne();
+    const notificationService = require('./notificationService');
+    try {
+      await notificationService.createNotification(post.user, userId, 'post_rejected', post._id);
+    } catch (err) {
+      console.error('Lỗi tạo thông báo từ chối bài viết:', err.message);
+    }
+
+    if (post.pendingEdit && post.pendingEdit.status === 'pending') {
+      // Từ chối chỉnh sửa ➔ Hủy bỏ thông tin sửa, giữ nguyên bài đăng cũ đang live
+      post.pendingEdit = undefined;
+      await post.save();
+    } else {
+      // Từ chối bài viết mới hoàn toàn ➔ Xóa bài viết khỏi cơ sở dữ liệu
+      await post.deleteOne();
+    }
   } else {
     const err = new Error('Trạng thái duyệt không hợp lệ');
     err.statusCode = 400;
@@ -546,6 +640,163 @@ const updatePostStatus = async (groupId, postId, userId, status) => {
   }
 
   return { message: status === 'approved' ? 'Đã phê duyệt bài viết' : 'Đã từ chối và xóa bài viết' };
+};
+
+/**
+ * Lấy bộ lọc từ cấm của nhóm (chỉ admin / mod)
+ */
+const getGroupFilters = async (groupId, userId) => {
+  const group = await getActiveGroupOrThrow(groupId);
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!canManageGroup(group, userId)) {
+    const err = new Error('Chỉ admin hoặc kiểm duyệt viên mới có quyền xem bộ lọc từ cấm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return group.bannedWords || [];
+};
+
+/**
+ * Thêm từ cấm vào nhóm (chỉ admin / mod)
+ */
+const addGroupFilter = async (groupId, userId, word) => {
+  const group = await getActiveGroupOrThrow(groupId);
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!canManageGroup(group, userId)) {
+    const err = new Error('Chỉ admin hoặc kiểm duyệt viên mới có quyền thêm từ cấm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const cleanWord = word ? word.trim() : '';
+  if (!cleanWord) {
+    const err = new Error('Từ cấm không được để trống');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (group.bannedWords.some(w => w.toLowerCase() === cleanWord.toLowerCase())) {
+    const err = new Error('Từ cấm này đã tồn tại trong bộ lọc nhóm');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  group.bannedWords.push(cleanWord);
+  await group.save();
+
+  return group.bannedWords;
+};
+
+/**
+ * Xóa từ cấm khỏi nhóm (chỉ admin / mod)
+ */
+const deleteGroupFilter = async (groupId, userId, word) => {
+  const group = await getActiveGroupOrThrow(groupId);
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!canManageGroup(group, userId)) {
+    const err = new Error('Chỉ admin hoặc kiểm duyệt viên mới có quyền xóa từ cấm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const decodedWord = decodeURIComponent(word).trim().toLowerCase();
+  group.bannedWords = group.bannedWords.filter(w => w.toLowerCase() !== decodedWord);
+  await group.save();
+
+  return group.bannedWords;
+};
+
+const kickMember = async (groupId, adminId, targetUserId) => {
+  const group = await getActiveGroupOrThrow(groupId);
+
+  if (!group) {
+    const err = new Error('Nhóm không tồn tại');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const isAdmin = group.admin.toString() === adminId.toString();
+  if (!isAdmin) {
+    const err = new Error('Chỉ Admin nhóm mới có quyền xóa thành viên');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  if (adminId.toString() === targetUserId.toString()) {
+    const err = new Error('Admin không thể tự xóa chính mình khỏi nhóm. Hãy sử dụng tính năng chuyển quyền admin.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const isTargetMember = group.members.some(
+    (m) => m.user && m.user.toString() === targetUserId.toString()
+  );
+  if (!isTargetMember) {
+    const err = new Error('Người dùng này không phải thành viên của nhóm');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  group.members = group.members.filter(
+    (m) => m.user && m.user.toString() !== targetUserId.toString()
+  );
+
+  if (Array.isArray(group.moderators)) {
+    group.moderators = group.moderators.filter(
+      (moderator) => moderator.toString() !== targetUserId.toString()
+    );
+  }
+
+  await group.save();
+
+  return { message: 'Đã xóa thành viên khỏi nhóm thành công', membersCount: group.members.length };
+};
+
+const updateGroupSettings = async (groupId, adminId, { privacyType, postModerationType }) => {
+  const group = await getActiveGroupOrThrow(groupId);
+
+  if (group.admin.toString() !== adminId.toString()) {
+    const err = new Error('Chỉ Admin nhóm mới có quyền thay đổi cài đặt nhóm');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  if (privacyType) {
+    if (!['public', 'private'].includes(privacyType)) {
+      const err = new Error('Loại riêng tư không hợp lệ');
+      err.statusCode = 400;
+      throw err;
+    }
+    group.privacyType = privacyType;
+  }
+
+  if (postModerationType) {
+    if (!['auto', 'manual'].includes(postModerationType)) {
+      const err = new Error('Chế độ kiểm duyệt không hợp lệ');
+      err.statusCode = 400;
+      throw err;
+    }
+    group.postModerationType = postModerationType;
+  }
+
+  await group.save();
+  return group;
 };
 
 module.exports = {
@@ -567,4 +818,9 @@ module.exports = {
   toggleModerator,
   getPendingPosts,
   updatePostStatus,
+  getGroupFilters,
+  addGroupFilter,
+  deleteGroupFilter,
+  kickMember,
+  updateGroupSettings,
 };

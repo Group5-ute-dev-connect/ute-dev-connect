@@ -60,7 +60,8 @@ const addPost = async (req, res) => {
 
 const getPost = async (req, res) => {
   try {
-    const post = await postService.getPostById(req.params.id, getUserId(req));
+    const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip;
+    const post = await postService.getPostById(req.params.id, getUserId(req), clientIp);
 
     res.status(200).json({
       success: true,
@@ -88,8 +89,10 @@ const getAllPosts = async (req, res) => {
   try {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 5;
+    const filter = req.query.filter || 'latest';
+    const timeframe = req.query.timeframe || '7d';
 
-    const result = await postService.getAllPosts(page, limit, getUserId(req));
+    const result = await postService.getAllPosts(page, limit, getUserId(req), filter, timeframe);
 
     res.status(200).json({
       success: true,
@@ -98,6 +101,8 @@ const getAllPosts = async (req, res) => {
       total: result.total,
       page,
       limit,
+      filter,
+      timeframe,
     });
   } catch (err) {
     console.error(err.message);
@@ -501,6 +506,29 @@ const approveComment = async (req, res) => {
   }
 };
 
+// @desc    Phản đối bình luận (Downvote / Disapprove Comment)
+const disapproveComment = async (req, res) => {
+  console.log(`[disapproveComment] Yêu cầu nhận được. Post ID: ${req.params.id}, Comment ID: ${req.params.comment_id}`);
+  try {
+    const userId = getUserId(req);
+    console.log(`[disapproveComment] User ID phân tích từ token: ${userId}`);
+    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
+
+    const comments = await postService.disapproveComment(req.params.id, req.params.comment_id, userId);
+    console.log(`[disapproveComment] Xử lý thành công, trả về số lượng bình luận: ${comments?.length}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'Cập nhật trạng thái phản đối bình luận thành công',
+      data: comments,
+    });
+  } catch (err) {
+    console.error(`[disapproveComment] Lỗi xảy ra:`, err);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
 // @desc    Ẩn / Hiện bài viết
 const hidePost = async (req, res) => {
   try {
@@ -548,7 +576,7 @@ const getHiddenPosts = async (req, res) => {
       limit,
     });
   } catch (err) {
-    console.    error(err.message);
+    console.error(err.message);
     if (err.statusCode) {
       return res.status(err.statusCode).json({ success: false, message: err.message });
     }
@@ -574,4 +602,5 @@ module.exports = {
   deleteComment,
   acceptAnswer,
   approveComment,
+  disapproveComment,
 };

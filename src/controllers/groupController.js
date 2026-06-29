@@ -36,8 +36,8 @@ const getAllGroups = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
     const keyword = req.query.q || '';
-
-    const result = await groupService.getAllGroups(page, limit, keyword);
+    const userId = getUserId(req);
+    const result = await groupService.getAllGroups(page, limit, keyword, userId);
 
     res.status(200).json({
       success: true,
@@ -164,7 +164,11 @@ const createGroupPost = async (req, res) => {
       req.body.codeLanguage || 'javascript'
     );
 
-    res.status(201).json({ success: true, message: 'Đăng bài trong nhóm thành công', data: post });
+    const message = post.status === 'pending'
+      ? 'Bài viết chứa từ khóa nhạy cảm và đã được gửi tới Ban quản trị nhóm để duyệt.'
+      : 'Đăng bài trong nhóm thành công';
+
+    res.status(201).json({ success: true, message, data: post });
   } catch (err) {
     console.error(err.message);
     if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
@@ -330,6 +334,80 @@ const updatePostStatus = async (req, res) => {
   }
 };
 
+// @desc    Lấy bộ lọc từ cấm của nhóm
+// @access  Private
+const getGroupFilters = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const groupId = req.params.id;
+    const filters = await groupService.getGroupFilters(groupId, userId);
+    res.status(200).json({ success: true, data: filters });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+// @desc    Thêm từ cấm vào bộ lọc của nhóm
+// @access  Private
+const addGroupFilter = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const groupId = req.params.id;
+    const { word } = req.body;
+    const filters = await groupService.addGroupFilter(groupId, userId, word);
+    res.status(200).json({ success: true, message: 'Thêm từ cấm thành công', data: filters });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+// @desc    Xóa từ cấm khỏi bộ lọc của nhóm
+// @access  Private
+const deleteGroupFilter = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const groupId = req.params.id;
+    const { word } = req.params;
+    const filters = await groupService.deleteGroupFilter(groupId, userId, word);
+    res.status(200).json({ success: true, message: 'Xóa từ cấm thành công', data: filters });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+const kickMember = async (req, res) => {
+  try {
+    const adminId = getUserId(req);
+    const result = await groupService.kickMember(req.params.id, adminId, req.params.userId);
+
+    res.status(200).json({ success: true, message: result.message, membersCount: result.membersCount });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+const updateGroupSettings = async (req, res) => {
+  try {
+    const adminId = getUserId(req);
+    const { privacyType, postModerationType } = req.body;
+    const group = await groupService.updateGroupSettings(req.params.id, adminId, { privacyType, postModerationType });
+
+    res.status(200).json({ success: true, message: 'Cập nhật cấu hình cài đặt nhóm thành công', data: group });
+  } catch (err) {
+    console.error(err.message);
+    if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
 module.exports = {
   createGroup,
   getAllGroups,
@@ -347,4 +425,9 @@ module.exports = {
   toggleModerator,
   getPendingPosts,
   updatePostStatus,
+  getGroupFilters,
+  addGroupFilter,
+  deleteGroupFilter,
+  kickMember,
+  updateGroupSettings,
 };

@@ -1,14 +1,54 @@
 const Post = require('../models/Post');
 const User = require('../models/User');
 const Group = require('../models/Group');
+const PostView = require('../models/PostView');
 
 const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
   try {
+    let status = 'approved';
+    let isPendingDueToBannedWord = false;
+
+    // Lấy thông tin nhóm học tập
+    let group = null;
+    if (groupId) {
+      group = await Group.findById(groupId);
+    }
+
     // Lọc nội dung cấm hoặc AI
     const filterService = require('./filterService');
-    await filterService.checkContent(text);
-    if (codeSnippet) {
-      await filterService.checkContent(codeSnippet);
+    const groupBannedWords = group ? (group.bannedWords || []) : [];
+
+    // Kiểm tra xem người đăng có phải Admin hoặc Mod nhóm không, nếu có thì tự động duyệt thông qua
+    const isAdminOrMod = group && (group.admin.toString() === userId.toString() ||
+                         (group.moderators && group.moderators.some(m => m.toString() === userId.toString())));
+
+    let textCheck = { isViolation: false };
+    let codeCheck = { isViolation: false };
+
+    if (!isAdminOrMod) {
+      textCheck = await filterService.checkContentWithGroup(text, groupBannedWords);
+      if (codeSnippet) {
+        codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+      }
+    }
+
+    if (groupId) {
+      if (!isAdminOrMod) {
+        if (group && group.postModerationType === 'manual') {
+          status = 'pending';
+        } else if (textCheck.isViolation || codeCheck.isViolation) {
+          status = 'pending';
+          isPendingDueToBannedWord = true;
+        }
+      }
+    } else {
+      if (textCheck.isViolation || codeCheck.isViolation) {
+        const violationWord = textCheck.word || codeCheck.word || '';
+        const violationReason = textCheck.reason || codeCheck.reason || '';
+        const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+        error.statusCode = 400;
+        throw error;
+      }
     }
 
     const user = await User.findById(userId).select('-password');
@@ -17,18 +57,6 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
       const error = new Error('Người dùng không tồn tại');
       error.statusCode = 404;
       throw error;
-    }
-
-    let status = 'approved';
-    if (groupId) {
-      const group = await Group.findById(groupId);
-      if (group) {
-        const isAdmin = group.admin.toString() === userId.toString();
-        const isMod = group.moderators && group.moderators.some(m => m.toString() === userId.toString());
-        if (!isAdmin && !isMod) {
-          status = 'pending';
-        }
-      }
     }
 
     const newPost = new Post({
@@ -46,13 +74,27 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
 
     let post = await newPost.save();
     post = await Post.findById(post._id).populate('user', 'name avatar reputation');
+
+    // Nếu bài đăng ở trạng thái pending trong nhóm, tạo thông báo hệ thống và gửi qua socket tới Admin/Mod nhóm
+    if (status === 'pending' && group) {
+      const notificationService = require('./notificationService');
+      const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+      for (const adminId of admins) {
+        try {
+          await notificationService.createNotification(adminId, userId, 'post_pending', post._id);
+        } catch (err) {
+          console.error('Lỗi tạo thông báo pending cho Admin/Mod nhóm:', err.message);
+        }
+      }
+    }
+
     return post;
   } catch (error) {
     throw error;
   }
 };
 
-const getPostById = async (postId, currentUserId = null) => {
+const getPostById = async (postId, currentUserId = null, clientIp = null) => {
   try {
     const post = await Post.findById(postId)
       .populate('user', 'name avatar reputation')
@@ -110,6 +152,31 @@ const getPostById = async (postId, currentUserId = null) => {
       }
     }
 
+    // Cooldown check for view tracking (15 minutes)
+    if (clientIp || currentUserId) {
+      const cooldownPeriod = new Date(Date.now() - 15 * 60 * 1000);
+      let query = { post: postId, date: { $gte: cooldownPeriod } };
+      if (currentUserId) {
+        query.user = currentUserId;
+      } else if (clientIp) {
+        query.ip = clientIp;
+      }
+
+      const hasViewed = await PostView.findOne(query);
+      if (!hasViewed) {
+        const newView = new PostView({
+          post: postId,
+          user: currentUserId || null,
+          ip: clientIp || '127.0.0.1'
+        });
+        await newView.save();
+
+        // Increment cached views on Post
+        post.views = (post.views || 0) + 1;
+        await Post.findByIdAndUpdate(postId, { $inc: { views: 1 } });
+      }
+    }
+
     return post;
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -122,7 +189,7 @@ const getPostById = async (postId, currentUserId = null) => {
   }
 };
 
-const getAllPosts = async (page = 1, limit = 5, currentUserId = null) => {
+const getAllPosts = async (page = 1, limit = 5, currentUserId = null, filterType = 'latest', timeframe = '7d') => {
   try {
     const skip = (page - 1) * limit;
 
@@ -132,12 +199,15 @@ const getAllPosts = async (page = 1, limit = 5, currentUserId = null) => {
       isHidden: { $ne: true }
     };
 
+    let followingIds = [];
+    let friendIds = [];
+
     if (currentUserId) {
       const user = await User.findById(currentUserId);
       if (user) {
-        const followingIds = user.following.map(f => f.user);
+        followingIds = user.following.map(f => f.user);
         const followerIds = user.followers.map(f => f.user);
-        const friendIds = followingIds.filter(id => 
+        friendIds = followingIds.filter(id => 
           followerIds.some(fId => fId.toString() === id.toString())
         );
 
@@ -158,11 +228,114 @@ const getAllPosts = async (page = 1, limit = 5, currentUserId = null) => {
       ];
     }
 
-    const posts = await Post.find(filter)
-      .populate('user', 'name avatar reputation')
-      .sort({ date: -1 })
-      .skip(skip)
-      .limit(limit);
+    // Tinh chỉnh bộ lọc theo loại (friends)
+    if (filterType === 'friends') {
+      if (!currentUserId) {
+        return { posts: [], hasMore: false, total: 0 };
+      }
+      filter = {
+        group: null,
+        isDeleted: { $ne: true },
+        isHidden: { $ne: true },
+        user: { $in: friendIds },
+        $or: [
+          { visibility: 'public' },
+          { visibility: { $exists: false } },
+          { visibility: 'friends' },
+          { visibility: 'followers' }
+        ]
+      };
+    }
+
+    let posts;
+    if (filterType === 'trending') {
+      if (timeframe === 'all') {
+        // Sắp xếp xu hướng Tất cả thời gian: dùng trực tiếp trường views trên Post (bao gồm cả các view cũ)
+        posts = await Post.aggregate([
+          { $match: filter },
+          {
+            $addFields: {
+              recentViewsCount: { $ifNull: ['$views', 0] },
+              likesCount: { $size: { $ifNull: ['$likes', []] } },
+              commentsCount: { $size: { $ifNull: ['$comments', []] } }
+            }
+          },
+          {
+            $sort: {
+              recentViewsCount: -1,
+              commentsCount: -1,
+              likesCount: -1,
+              date: -1
+            }
+          },
+          { $skip: skip },
+          { $limit: limit }
+        ]);
+      } else {
+        // Xác định thời điểm bắt đầu lọc views cho các khoảng thời gian cụ thể
+        let startDate = new Date(0);
+        const now = Date.now();
+        if (timeframe === '24h') {
+          startDate = new Date(now - 24 * 60 * 60 * 1000);
+        } else if (timeframe === '7d') {
+          startDate = new Date(now - 7 * 24 * 60 * 60 * 1000);
+        } else if (timeframe === '30d') {
+          startDate = new Date(now - 30 * 24 * 60 * 60 * 1000);
+        }
+
+        // Sắp xếp xu hướng: ưu tiên views trong timeframe, commentsCount, likesCount, date
+        posts = await Post.aggregate([
+          { $match: filter },
+          {
+            $lookup: {
+              from: 'postviews',
+              let: { postId: '$_id' },
+              pipeline: [
+                {
+                  $match: {
+                    $expr: {
+                      $and: [
+                        { $eq: ['$post', '$$postId'] },
+                        { $gte: ['$date', startDate] }
+                      ]
+                    }
+                  }
+                },
+                { $count: 'count' }
+              ],
+              as: 'recentViews'
+            }
+          },
+          {
+            $addFields: {
+              recentViewsCount: {
+                $ifNull: [ { $arrayElemAt: ['$recentViews.count', 0] }, 0 ]
+              },
+              likesCount: { $size: { $ifNull: ['$likes', []] } },
+              commentsCount: { $size: { $ifNull: ['$comments', []] } }
+            }
+          },
+          {
+            $sort: {
+              recentViewsCount: -1,
+              commentsCount: -1,
+              likesCount: -1,
+              date: -1
+            }
+          },
+          { $skip: skip },
+          { $limit: limit }
+        ]);
+      }
+      await Post.populate(posts, { path: 'user', select: 'name avatar reputation' });
+    } else {
+      // 'latest' hoặc 'friends'
+      posts = await Post.find(filter)
+        .populate('user', 'name avatar reputation')
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(limit);
+    }
 
     const total = await Post.countDocuments(filter);
     const hasMore = total > skip + posts.length;
@@ -431,13 +604,6 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
       throw error;
     }
 
-    // Lọc nội dung cấm hoặc AI
-    const filterService = require('./filterService');
-    await filterService.checkContent(normalizedText);
-    if (codeSnippet) {
-      await filterService.checkContent(codeSnippet);
-    }
-
     const user = await User.findById(userId).select('-password');
 
     if (!user) {
@@ -451,6 +617,30 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
     if (!post) {
       const error = new Error('Bài viết không tồn tại');
       error.statusCode = 404;
+      throw error;
+    }
+
+    // Lọc nội dung cấm hoặc AI dựa trên nhóm học tập của bài viết
+    let groupBannedWords = [];
+    if (post.group) {
+      const group = await Group.findById(post.group);
+      if (group) {
+        groupBannedWords = group.bannedWords || [];
+      }
+    }
+
+    const filterService = require('./filterService');
+    const textCheck = await filterService.checkContentWithGroup(normalizedText, groupBannedWords);
+    let codeCheck = { isViolation: false };
+    if (codeSnippet) {
+      codeCheck = await filterService.checkContentWithGroup(codeSnippet, groupBannedWords);
+    }
+
+    if (textCheck.isViolation || codeCheck.isViolation) {
+      const violationWord = textCheck.word || codeCheck.word || '';
+      const violationReason = textCheck.reason || codeCheck.reason || '';
+      const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+      error.statusCode = 400;
       throw error;
     }
 
@@ -486,15 +676,6 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
 // Cập nhật bài viết
 const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLanguage, visibility) => {
   try {
-    // Lọc nội dung cấm hoặc AI
-    const filterService = require('./filterService');
-    if (text !== undefined) {
-      await filterService.checkContent(text);
-    }
-    if (codeSnippet !== undefined) {
-      await filterService.checkContent(codeSnippet);
-    }
-
     const post = await Post.findById(postId);
     if (!post || post.isDeleted) {
       const error = new Error('Bài viết không tồn tại');
@@ -507,14 +688,100 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
       throw error;
     }
 
-    post.text = text !== undefined ? text : post.text;
-    post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
-    post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
-    post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+    let status = 'approved';
+    const filterService = require('./filterService');
+
+    // Nếu bài viết thuộc nhóm học tập, kiểm tra bộ lọc nhóm + bộ lọc hệ thống
+    if (post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      
+      const isAdminOrMod = group && (group.admin.toString() === userId.toString() ||
+                           (group.moderators && group.moderators.some(m => m.toString() === userId.toString())));
+      
+      if (isAdminOrMod) {
+        status = 'approved';
+      } else {
+        if (group && group.postModerationType === 'manual') {
+          status = 'pending';
+        } else {
+          const checkText = text !== undefined ? text : post.text;
+          const checkSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+          
+          const checkResult = await filterService.checkContentWithGroup(checkText, group.bannedWords || []);
+          const snippetCheckResult = checkSnippet ? await filterService.checkContentWithGroup(checkSnippet, group.bannedWords || []) : { isViolation: false };
+          
+          if (checkResult.isViolation || snippetCheckResult.isViolation) {
+            status = 'pending';
+          }
+        }
+      }
+    } else {
+      // Bài viết công khai ngoài nhóm, nếu dính từ cấm hệ thống thì chặn lỗi 400 như cũ
+      if (text !== undefined) {
+        await filterService.checkContent(text);
+      }
+      if (codeSnippet !== undefined) {
+        await filterService.checkContent(codeSnippet);
+      }
+    }
+
+    const isAlreadyApproved = post.status === 'approved';
+
+    if (status === 'pending') {
+      if (isAlreadyApproved) {
+        // Lưu chỉnh sửa vào pendingEdit, giữ nguyên nội dung bài đăng đang hiện hữu
+        post.pendingEdit = {
+          text: text !== undefined ? text : post.text,
+          codeSnippet: codeSnippet !== undefined ? codeSnippet : post.codeSnippet,
+          codeLanguage: codeLanguage !== undefined ? codeLanguage : post.codeLanguage,
+          isQuestion: isQuestion !== undefined ? isQuestion : post.isQuestion,
+          status: 'pending'
+        };
+      } else {
+        // Bài viết mới chưa duyệt, ghi đè trực tiếp
+        post.text = text !== undefined ? text : post.text;
+        post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
+        post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+        post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+        post.status = 'pending';
+      }
+    } else {
+      // Nội dung sửa đổi hợp lệ, lưu đè trực tiếp và xóa pendingEdit cũ (nếu có)
+      post.text = text !== undefined ? text : post.text;
+      post.isQuestion = isQuestion !== undefined ? isQuestion : post.isQuestion;
+      post.codeSnippet = codeSnippet !== undefined ? codeSnippet : post.codeSnippet;
+      post.codeLanguage = codeLanguage !== undefined ? codeLanguage : post.codeLanguage;
+      post.pendingEdit = undefined;
+      
+      // Nếu bài viết thuộc nhóm, chuyển trạng thái về approved
+      if (post.group) {
+        post.status = 'approved';
+      }
+    }
+    
     post.visibility = visibility !== undefined ? visibility : post.visibility;
     
     await post.save();
     await post.populate('user', 'name avatar reputation');
+
+    // Nếu chuyển sang pending, tạo thông báo cho Admin/Mod nhóm
+    if (status === 'pending' && post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      if (group) {
+        const notificationService = require('./notificationService');
+        const admins = [group.admin.toString(), ...(group.moderators || []).map(m => m.toString())];
+        for (const adminId of admins) {
+          try {
+            await notificationService.createNotification(adminId, userId, 'post_pending', post._id);
+          } catch (err) {
+            console.error('Lỗi tạo thông báo pending cho Admin/Mod nhóm khi sửa bài:', err.message);
+          }
+        }
+      }
+    }
+
     return post;
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -536,7 +803,22 @@ const deletePost = async (postId, userId) => {
       throw error;
     }
     
-    if (post.user.toString() !== userId.toString()) {
+    let hasDeletePermission = post.user.toString() === userId.toString();
+    
+    // Nếu là bài viết trong nhóm, cho phép Admin/Mod nhóm xóa bài viết đó
+    if (!hasDeletePermission && post.group) {
+      const Group = require('../models/Group');
+      const group = await Group.findById(post.group);
+      if (group) {
+        const isAdmin = group.admin.toString() === userId.toString();
+        const isMod = group.moderators && group.moderators.some(m => m.toString() === userId.toString());
+        if (isAdmin || isMod) {
+          hasDeletePermission = true;
+        }
+      }
+    }
+
+    if (!hasDeletePermission) {
       const error = new Error('Người dùng không có quyền xóa bài viết này');
       error.statusCode = 401;
       throw error;
@@ -792,31 +1074,93 @@ const approveComment = async (postId, commentId, userId) => {
       throw error;
     }
 
-    if (!comment.approvals) {
-      comment.approvals = [];
-    }
+    if (!comment.approvals) comment.approvals = [];
+    if (!comment.disapprovals) comment.disapprovals = [];
 
     const approvedIndex = comment.approvals.findIndex(
       (app) => app.user.toString() === userId.toString()
     );
+    const disapprovedIndex = comment.disapprovals.findIndex(
+      (dis) => dis.user.toString() === userId.toString()
+    );
 
-    let approved = false;
     let reputationChange = 0;
 
     if (approvedIndex === -1) {
       comment.approvals.push({ user: userId });
-      approved = true;
-      reputationChange = 10; // Cộng 10 điểm uy tín
+      reputationChange += 10;
+
+      if (disapprovedIndex !== -1) {
+        comment.disapprovals.splice(disapprovedIndex, 1);
+        reputationChange += 10; // Hủy downvote cũ, hoàn lại điểm
+      }
     } else {
       comment.approvals.splice(approvedIndex, 1);
-      approved = false;
-      reputationChange = -10; // Trừ 10 điểm uy tín
+      reputationChange -= 10;
     }
 
     await post.save();
 
-    // Cập nhật reputation cho commenter nếu không tự upvote
-    if (comment.user && comment.user.toString() !== userId.toString()) {
+    if (comment.user && comment.user.toString() !== userId.toString() && reputationChange !== 0) {
+      await User.findByIdAndUpdate(comment.user, {
+        $inc: { reputation: reputationChange }
+      });
+    }
+
+    await post.populate('comments.user', 'name avatar reputation');
+    return post.comments;
+  } catch (error) {
+    throw error;
+  }
+};
+
+// Phản đối bình luận (Downvote / Disapprove Comment)
+const disapproveComment = async (postId, commentId, userId) => {
+  console.log(`[postService.disapproveComment] Khởi tạo. Post: ${postId}, Comment: ${commentId}, User: ${userId}`);
+  try {
+    const post = await Post.findById(postId);
+    if (!post) {
+      console.log(`[postService.disapproveComment] LỖI: Không tìm thấy bài viết ${postId}`);
+      const error = new Error('Bài viết không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const comment = post.comments.id ? post.comments.id(commentId) : post.comments.find(c => c._id.toString() === commentId.toString());
+    if (!comment) {
+      const error = new Error('Bình luận không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    if (!comment.approvals) comment.approvals = [];
+    if (!comment.disapprovals) comment.disapprovals = [];
+
+    const approvedIndex = comment.approvals.findIndex(
+      (app) => app.user.toString() === userId.toString()
+    );
+    const disapprovedIndex = comment.disapprovals.findIndex(
+      (dis) => dis.user.toString() === userId.toString()
+    );
+
+    let reputationChange = 0;
+
+    if (disapprovedIndex === -1) {
+      comment.disapprovals.push({ user: userId });
+      reputationChange -= 10;
+
+      if (approvedIndex !== -1) {
+        comment.approvals.splice(approvedIndex, 1);
+        reputationChange -= 10; // Hủy upvote cũ, trừ thêm điểm
+      }
+    } else {
+      comment.disapprovals.splice(disapprovedIndex, 1);
+      reputationChange += 10; // Hủy downvote, cộng lại điểm
+    }
+
+    await post.save();
+
+    if (comment.user && comment.user.toString() !== userId.toString() && reputationChange !== 0) {
       await User.findByIdAndUpdate(comment.user, {
         $inc: { reputation: reputationChange }
       });
@@ -847,4 +1191,5 @@ module.exports = {
   deleteComment,
   acceptAnswer,
   approveComment,
+  disapproveComment,
 };

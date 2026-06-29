@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 
 
 const app = express();
 
+app.use(cors());
 connectDB();
 
 app.use(express.json());
@@ -26,9 +28,10 @@ app.use('/api/notifications', require('./routes/notificationRoutes'));
 app.use('/api/groups', require('./routes/groupRoutes'));
 app.use('/api/search', require('./routes/searchRoutes'));
 app.use('/api/filters', require('./routes/filterRoutes'));
+app.use('/api/admin', require('./routes/adminRoutes'));
 
 const http = require('http');
-const { Server } = require('socket.io');
+const socketIO = require('./utils/socketIO');
 const { ExpressPeerServer } = require('peer');
 
 const server = http.createServer(app);
@@ -40,12 +43,7 @@ const peerServer = ExpressPeerServer(server, {
 });
 app.use('/peer', peerServer);
 
-const io = new Server(server, {
-  cors: {
-    origin: '*', // Tạm thời allow all origin để test frontend dễ dàng
-    methods: ['GET', 'POST'],
-  },
-});
+const io = socketIO.init(server);
 
 const Message = require('./models/Message');
 const Conversation = require('./models/Conversation');

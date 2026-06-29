@@ -148,11 +148,54 @@ const importBannedWords = async (req, res) => {
   }
 };
 
+// Cập nhật AI Prompt
+const updateAiPrompt = async (req, res) => {
+  try {
+    const { aiPrompt } = req.body;
+    if (!aiPrompt || !aiPrompt.trim()) {
+      return res.status(400).json({ success: false, message: 'Nội dung bộ lọc AI không được để trống' });
+    }
+
+    const filter = await filterService.getOrCreateFilter();
+    filter.aiPrompt = aiPrompt.trim();
+    await filter.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Cập nhật bộ lọc AI thành công',
+      data: filter
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
+// Khôi phục AI Prompt mặc định
+const resetAiPrompt = async (req, res) => {
+  try {
+    const filter = await filterService.getOrCreateFilter();
+    filter.aiPrompt = filterService.DEFAULT_AI_PROMPT;
+    await filter.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Khôi phục bộ lọc AI mẫu thành công',
+      data: filter
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).json({ success: false, message: 'Lỗi Server' });
+  }
+};
+
 module.exports = {
   getFilterConfig,
   addBannedWord,
   deleteBannedWord,
   toggleAiFilter,
   exportBannedWords,
-  importBannedWords
+  importBannedWords,
+  updateAiPrompt,
+  resetAiPrompt
 };

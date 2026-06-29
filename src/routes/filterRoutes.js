@@ -32,6 +32,8 @@ router.get('/', [verifyToken, verifyAdmin], filterController.getFilterConfig);
 router.post('/words', [verifyToken, verifyAdmin], filterController.addBannedWord);
 router.delete('/words/:word', [verifyToken, verifyAdmin], filterController.deleteBannedWord);
 router.put('/ai', [verifyToken, verifyAdmin], filterController.toggleAiFilter);
+router.put('/ai-prompt', [verifyToken, verifyAdmin], filterController.updateAiPrompt);
+router.post('/ai-prompt/reset', [verifyToken, verifyAdmin], filterController.resetAiPrompt);
 
 // Các route xuất/nhập CSV
 router.get('/export', [verifyToken, verifyAdmin], filterController.exportBannedWords);
