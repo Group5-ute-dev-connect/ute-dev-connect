@@ -2,6 +2,7 @@ const Post = require('../models/Post');
 const User = require('../models/User');
 const Group = require('../models/Group');
 const PostView = require('../models/PostView');
+const logService = require('./logService');
 
 const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
   try {
@@ -88,6 +89,8 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
       }
     }
 
+    await logService.createLog('post', 'create', userId, post._id, groupId, null, { text });
+
     return post;
   } catch (error) {
     throw error;
@@ -99,34 +102,42 @@ const getPostById = async (postId, currentUserId = null, clientIp = null) => {
     const post = await Post.findById(postId)
       .populate('user', 'name avatar reputation')
       .populate('comments.user', 'name avatar reputation');
+    const viewer = currentUserId ? await User.findById(currentUserId) : null;
+    const isAdmin = viewer && viewer.role === 'admin';
 
-    if (!post || post.isDeleted) {
+    if (!post) {
       const error = new Error('Bài viết không tồn tại');
       error.statusCode = 404;
       throw error;
     }
 
-    // Check hidden post access
-    if (post.isHidden && post.user?._id?.toString() !== currentUserId?.toString()) {
-      const error = new Error('Bài viết đã bị ẩn');
-      error.statusCode = 403;
+    if (post.isDeleted && !isAdmin) {
+      const error = new Error('Bài viết không tồn tại');
+      error.statusCode = 404;
       throw error;
     }
 
-    // Check visibility logic
-    if (post.visibility && post.visibility !== 'public' && post.user?._id?.toString() !== currentUserId?.toString()) {
-      if (!currentUserId) {
-        const error = new Error('Bạn không có quyền xem bài viết này');
-        error.statusCode = 401;
+    if (!isAdmin) {
+      // Check hidden post access
+      if (post.isHidden && post.user?._id?.toString() !== currentUserId?.toString()) {
+        const error = new Error('Bài viết đã bị ẩn');
+        error.statusCode = 403;
         throw error;
       }
 
-      const viewer = await User.findById(currentUserId);
-      if (!viewer) {
-        const error = new Error('Bạn không có quyền xem bài viết này');
-        error.statusCode = 401;
-        throw error;
-      }
+      // Check visibility logic
+      if (post.visibility && post.visibility !== 'public' && post.user?._id?.toString() !== currentUserId?.toString()) {
+        if (!currentUserId) {
+          const error = new Error('Bạn không có quyền xem bài viết này');
+          error.statusCode = 401;
+          throw error;
+        }
+
+        if (!viewer) {
+          const error = new Error('Bạn không có quyền xem bài viết này');
+          error.statusCode = 401;
+          throw error;
+        }
 
       const authorId = post.user?._id?.toString() || post.user?.toString();
       const followingIds = viewer.following.map(f => f.user?.toString());
@@ -151,6 +162,7 @@ const getPostById = async (postId, currentUserId = null, clientIp = null) => {
         }
       }
     }
+  }
 
     // Cooldown check for view tracking (15 minutes)
     if (clientIp || currentUserId) {
@@ -568,6 +580,8 @@ const toggleLikePost = async (postId, userId) => {
 
     await post.save();
 
+    await logService.createLog('like', liked ? 'like' : 'unlike', userId, post._id, post.group, null);
+
     // Cập nhật reputation cho tác giả bài viết nếu không tự like
     if (post.user && post.user.toString() !== userId.toString()) {
       await User.findByIdAndUpdate(post.user, {
@@ -656,6 +670,9 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
 
     post.comments.unshift(newComment);
     await post.save();
+    
+    await logService.createLog('comment', 'create', userId, post._id, post.group, post.comments[0]._id, { text: normalizedText });
+
     await post.populate('comments.user', 'name avatar reputation');
 
     return {
@@ -763,6 +780,9 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
     post.visibility = visibility !== undefined ? visibility : post.visibility;
     
     await post.save();
+    
+    await logService.createLog('post', 'update', userId, post._id, post.group, null, { text: text !== undefined ? text : post.text });
+
     await post.populate('user', 'name avatar reputation');
 
     // Nếu chuyển sang pending, tạo thông báo cho Admin/Mod nhóm
@@ -836,6 +856,9 @@ const deletePost = async (postId, userId) => {
 
     post.isDeleted = true;
     await post.save();
+
+    await logService.createLog('post', 'delete', userId, post._id, post.group, null, { text: post.text });
+
     return { message: 'Bài viết đã được xóa' };
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -933,6 +956,9 @@ const updateComment = async (postId, commentId, userId, text) => {
 
     comment.text = text !== undefined ? text : comment.text;
     await post.save();
+
+    await logService.createLog('comment', 'update', userId, post._id, post.group, commentId, { text: text !== undefined ? text : comment.text });
+
     await post.populate('comments.user', 'name avatar reputation');
     return post.comments;
   } catch (error) {
@@ -980,6 +1006,9 @@ const deleteComment = async (postId, commentId, userId) => {
 
     post.comments.splice(commentIndex, 1);
     await post.save();
+
+    await logService.createLog('comment', 'delete', userId, post._id, post.group, commentId, { text: comment.text });
+
     await post.populate('comments.user', 'name avatar reputation');
     return post.comments;
   } catch (error) {
