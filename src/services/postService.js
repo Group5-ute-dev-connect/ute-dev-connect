@@ -102,34 +102,42 @@ const getPostById = async (postId, currentUserId = null, clientIp = null) => {
     const post = await Post.findById(postId)
       .populate('user', 'name avatar reputation')
       .populate('comments.user', 'name avatar reputation');
+    const viewer = currentUserId ? await User.findById(currentUserId) : null;
+    const isAdmin = viewer && viewer.role === 'admin';
 
-    if (!post || post.isDeleted) {
+    if (!post) {
       const error = new Error('Bài viết không tồn tại');
       error.statusCode = 404;
       throw error;
     }
 
-    // Check hidden post access
-    if (post.isHidden && post.user?._id?.toString() !== currentUserId?.toString()) {
-      const error = new Error('Bài viết đã bị ẩn');
-      error.statusCode = 403;
+    if (post.isDeleted && !isAdmin) {
+      const error = new Error('Bài viết không tồn tại');
+      error.statusCode = 404;
       throw error;
     }
 
-    // Check visibility logic
-    if (post.visibility && post.visibility !== 'public' && post.user?._id?.toString() !== currentUserId?.toString()) {
-      if (!currentUserId) {
-        const error = new Error('Bạn không có quyền xem bài viết này');
-        error.statusCode = 401;
+    if (!isAdmin) {
+      // Check hidden post access
+      if (post.isHidden && post.user?._id?.toString() !== currentUserId?.toString()) {
+        const error = new Error('Bài viết đã bị ẩn');
+        error.statusCode = 403;
         throw error;
       }
 
-      const viewer = await User.findById(currentUserId);
-      if (!viewer) {
-        const error = new Error('Bạn không có quyền xem bài viết này');
-        error.statusCode = 401;
-        throw error;
-      }
+      // Check visibility logic
+      if (post.visibility && post.visibility !== 'public' && post.user?._id?.toString() !== currentUserId?.toString()) {
+        if (!currentUserId) {
+          const error = new Error('Bạn không có quyền xem bài viết này');
+          error.statusCode = 401;
+          throw error;
+        }
+
+        if (!viewer) {
+          const error = new Error('Bạn không có quyền xem bài viết này');
+          error.statusCode = 401;
+          throw error;
+        }
 
       const authorId = post.user?._id?.toString() || post.user?.toString();
       const followingIds = viewer.following.map(f => f.user?.toString());
@@ -154,6 +162,7 @@ const getPostById = async (postId, currentUserId = null, clientIp = null) => {
         }
       }
     }
+  }
 
     // Cooldown check for view tracking (15 minutes)
     if (clientIp || currentUserId) {
