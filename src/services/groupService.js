@@ -110,7 +110,7 @@ const createGroup = async (userId, { name, description, tags }) => {
 /**
  * Lấy tất cả nhóm đang hoạt động (có phân trang + tìm kiếm tên)
  */
-const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
+const getAllGroups = async (page = 1, limit = 10, keyword = '', userId = null) => {
   const skip = (page - 1) * limit;
   const filter = { isActive: true };
 
@@ -122,7 +122,6 @@ const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
   }
 
   const groups = await Group.find(filter)
-    .select('-joinRequests')
     .populate('admin', 'name avatar')
     .sort({ date: -1 })
     .skip(skip)
@@ -131,7 +130,26 @@ const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
   const total = await Group.countDocuments(filter);
   const hasMore = total > skip + groups.length;
 
-  return { groups, total, hasMore };
+  const mappedGroups = groups.map((g) => {
+    const groupObj = g.toObject();
+    const latestRequest = userId ? findLatestJoinRequest(g, userId) : null;
+    const joinRequestStatus = latestRequest ? latestRequest.status : '';
+    const hasPendingJoinRequest = joinRequestStatus === 'pending';
+
+    delete groupObj.joinRequests;
+
+    return {
+      ...groupObj,
+      isMember: userId ? isMember(g, userId) : false,
+      isAdmin: userId ? isGroupAdmin(g, userId) : false,
+      isMod: userId ? isGroupModerator(g, userId) : false,
+      membersCount: g.members?.length || 0,
+      joinRequestStatus,
+      hasPendingJoinRequest,
+    };
+  });
+
+  return { groups: mappedGroups, total, hasMore };
 };
 
 /**
@@ -139,7 +157,6 @@ const getAllGroups = async (page = 1, limit = 10, keyword = '') => {
  */
 const getGroupById = async (groupId, userId) => {
   const group = await Group.findOne({ _id: groupId, isActive: true })
-    .select('-joinRequests')
     .populate('admin', 'name avatar')
     .populate('members.user', 'name avatar')
     .populate('moderators', 'name avatar');
@@ -150,14 +167,23 @@ const getGroupById = async (groupId, userId) => {
     throw err;
   }
 
+  const latestRequest = userId ? findLatestJoinRequest(group, userId) : null;
+  const joinRequestStatus = latestRequest ? latestRequest.status : '';
+  const hasPendingJoinRequest = joinRequestStatus === 'pending';
+
+  const groupObj = group.toObject();
+  delete groupObj.joinRequests;
+
   return {
-    ...group.toObject(),
+    ...groupObj,
     privacyType: group.privacyType || 'private',
     postModerationType: group.postModerationType || 'auto',
     isMember: userId ? isMember(group, userId) : false,
     isAdmin: userId ? isGroupAdmin(group, userId) : false,
     isMod: userId ? isGroupModerator(group, userId) : false,
     membersCount: group.members.length,
+    joinRequestStatus,
+    hasPendingJoinRequest,
   };
 };
 

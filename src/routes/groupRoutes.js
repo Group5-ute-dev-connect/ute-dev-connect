@@ -57,7 +57,7 @@ const requireGroupMember = async (req, res, next) => {
 // @route   GET /api/groups
 // @desc    Lấy tất cả nhóm (có phân trang + tìm kiếm ?q=...)
 // @access  Public
-router.get('/', groupController.getAllGroups);
+router.get('/', optionalToken, groupController.getAllGroups);
 
 // @route   POST /api/groups
 // @desc    Tạo nhóm mới

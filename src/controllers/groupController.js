@@ -36,8 +36,8 @@ const getAllGroups = async (req, res) => {
     const page = parseInt(req.query.page, 10) || 1;
     const limit = parseInt(req.query.limit, 10) || 10;
     const keyword = req.query.q || '';
-
-    const result = await groupService.getAllGroups(page, limit, keyword);
+    const userId = getUserId(req);
+    const result = await groupService.getAllGroups(page, limit, keyword, userId);
 
     res.status(200).json({
       success: true,
