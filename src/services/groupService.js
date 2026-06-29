@@ -1,6 +1,7 @@
 const Group = require('../models/Group');
 const Post = require('../models/Post');
 const User = require('../models/User');
+const logService = require('./logService');
 
 const toIdString = (value) => {
   if (!value) {
@@ -104,6 +105,7 @@ const createGroup = async (userId, { name, description, tags }) => {
   });
 
   await group.save();
+  await logService.createLog('group', 'create', userId, null, group._id, null, { name, description });
   return group;
 };
 
@@ -213,6 +215,7 @@ const joinGroup = async (groupId, userId) => {
   if (group.privacyType === 'public') {
     group.members.push({ user: userId });
     await group.save();
+    await logService.createLog('group', 'join', userId, null, group._id, null, { name: group.name, direct: true });
     return {
       message: 'Tham gia nhóm thành công',
       status: 'approved',
@@ -239,6 +242,7 @@ const joinGroup = async (groupId, userId) => {
     });
   }
   await group.save();
+  await logService.createLog('group', 'join', userId, null, group._id, null, { name: group.name, direct: false, status: 'pending' });
   return {
     message: 'Đã gửi yêu cầu tham gia nhóm, vui lòng chờ duyệt',
     status: 'pending',
@@ -282,6 +286,7 @@ const leaveGroup = async (groupId, userId) => {
     );
   }
   await group.save();
+  await logService.createLog('group', 'leave', userId, null, group._id, null, { name: group.name });
 
   return { message: 'Rời nhóm thành công', membersCount: group.members.length };
 };
@@ -306,6 +311,7 @@ const deleteGroup = async (groupId, userId) => {
 
   group.isActive = false;
   await group.save();
+  await logService.createLog('group', 'delete', userId, null, group._id, null, { name: group.name });
 
   return { message: 'Xóa nhóm thành công' };
 };
@@ -388,6 +394,7 @@ const approveJoinRequest = async (groupId, managerId, targetUserId) => {
 
   pendingRequest.status = 'approved';
   await group.save();
+  await logService.createLog('group', 'join', targetUserId, null, group._id, null, { name: group.name, approvedBy: managerId });
 
   return {
     message: 'Đã duyệt yêu cầu tham gia nhóm thành công',

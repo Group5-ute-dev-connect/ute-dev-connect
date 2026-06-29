@@ -2,6 +2,7 @@ const Post = require('../models/Post');
 const User = require('../models/User');
 const Group = require('../models/Group');
 const PostView = require('../models/PostView');
+const logService = require('./logService');
 
 const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
   try {
@@ -87,6 +88,8 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
         }
       }
     }
+
+    await logService.createLog('post', 'create', userId, post._id, groupId, null, { text });
 
     return post;
   } catch (error) {
@@ -568,6 +571,8 @@ const toggleLikePost = async (postId, userId) => {
 
     await post.save();
 
+    await logService.createLog('like', liked ? 'like' : 'unlike', userId, post._id, post.group, null);
+
     // Cập nhật reputation cho tác giả bài viết nếu không tự like
     if (post.user && post.user.toString() !== userId.toString()) {
       await User.findByIdAndUpdate(post.user, {
@@ -656,6 +661,9 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
 
     post.comments.unshift(newComment);
     await post.save();
+    
+    await logService.createLog('comment', 'create', userId, post._id, post.group, post.comments[0]._id, { text: normalizedText });
+
     await post.populate('comments.user', 'name avatar reputation');
 
     return {
@@ -763,6 +771,9 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
     post.visibility = visibility !== undefined ? visibility : post.visibility;
     
     await post.save();
+    
+    await logService.createLog('post', 'update', userId, post._id, post.group, null, { text: text !== undefined ? text : post.text });
+
     await post.populate('user', 'name avatar reputation');
 
     // Nếu chuyển sang pending, tạo thông báo cho Admin/Mod nhóm
@@ -836,6 +847,9 @@ const deletePost = async (postId, userId) => {
 
     post.isDeleted = true;
     await post.save();
+
+    await logService.createLog('post', 'delete', userId, post._id, post.group, null, { text: post.text });
+
     return { message: 'Bài viết đã được xóa' };
   } catch (error) {
     if (error.kind === 'ObjectId') {
@@ -933,6 +947,9 @@ const updateComment = async (postId, commentId, userId, text) => {
 
     comment.text = text !== undefined ? text : comment.text;
     await post.save();
+
+    await logService.createLog('comment', 'update', userId, post._id, post.group, commentId, { text: text !== undefined ? text : comment.text });
+
     await post.populate('comments.user', 'name avatar reputation');
     return post.comments;
   } catch (error) {
@@ -980,6 +997,9 @@ const deleteComment = async (postId, commentId, userId) => {
 
     post.comments.splice(commentIndex, 1);
     await post.save();
+
+    await logService.createLog('comment', 'delete', userId, post._id, post.group, commentId, { text: comment.text });
+
     await post.populate('comments.user', 'name avatar reputation');
     return post.comments;
   } catch (error) {
