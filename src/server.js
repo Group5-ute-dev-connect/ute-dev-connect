@@ -6,8 +6,37 @@ const connectDB = require('./config/db');
 
 const app = express();
 
+// Cấu hình danh sách Origins được phép truy cập (hỗ trợ nhiều tên miền cách nhau bằng dấu phẩy)
+const clientUrlEnv = process.env.CLIENT_URL;
+let allowedOrigins = [];
+
+if (clientUrlEnv) {
+  allowedOrigins = clientUrlEnv
+    .split(',')
+    .map(url => url.trim().replace(/\/$/, ''));
+} else {
+  allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+}
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: function (origin, callback) {
+    // Cho phép các request không có origin (ví dụ: Postman, Mobile App)
+    if (!origin) return callback(null, true);
+    
+    const normalizedOrigin = origin.replace(/\/$/, '');
+    
+    // Kiểm tra xem origin yêu cầu có thuộc danh sách cho phép hay không
+    if (allowedOrigins.includes(normalizedOrigin) || allowedOrigins.includes('*')) {
+      return callback(null, true);
+    }
+    
+    // Tự động cho phép localhost khi chạy thử ở môi trường development
+    if (process.env.NODE_ENV !== 'production' && (normalizedOrigin.startsWith('http://localhost:') || normalizedOrigin.startsWith('http://127.0.0.1:'))) {
+      return callback(null, true);
+    }
+    
+    return callback(null, false);
+  },
   credentials: true
 }));
 connectDB();
