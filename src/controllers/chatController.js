@@ -1,11 +1,10 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const mongoose = require('mongoose');
 
 // Lấy danh sách phòng chat của user hiện tại
 exports.getConversations = async (req, res) => {
   try {
-    console.log("=> GET /chat/conversations, req.user.id:", req.user.id);
-    const mongoose = require('mongoose');
     const objectId = new mongoose.Types.ObjectId(req.user.id);
     
     const conversations = await Conversation.find({
@@ -15,10 +14,6 @@ exports.getConversations = async (req, res) => {
       .populate('lastMessage')
       .sort({ updatedAt: -1 });
 
-    console.log("=> Found conversations count:", conversations.length);
-    if (conversations.length > 0) {
-      console.log("=> First conversation ID:", conversations[0]._id);
-    }
     res.status(200).json(conversations);
   } catch (error) {
     console.error('Lỗi khi lấy danh sách phòng chat:', error);
@@ -30,7 +25,6 @@ exports.getConversations = async (req, res) => {
 exports.getMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const mongoose = require('mongoose');
     const objectId = new mongoose.Types.ObjectId(req.user.id);
 
     // Kiểm tra xem phòng chat có tồn tại và user có nằm trong phòng đó không
@@ -65,7 +59,6 @@ exports.createOrGetConversation = async (req, res) => {
   try {
     const { userId } = req.params; // ID của người muốn chat cùng
     const currentUserId = req.user.id;
-    const mongoose = require('mongoose');
     const objectCurrentId = new mongoose.Types.ObjectId(currentUserId);
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
