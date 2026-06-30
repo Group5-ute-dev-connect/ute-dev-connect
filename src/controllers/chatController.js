@@ -112,3 +112,37 @@ exports.uploadFile = async (req, res) => {
     res.status(500).json({ message: 'Lỗi server' });
   }
 };
+
+// Tạo phòng chat nhóm
+exports.createGroup = async (req, res) => {
+  try {
+    const { chatName, userIds } = req.body;
+    
+    if (!chatName || !userIds || userIds.length === 0) {
+      return res.status(400).json({ message: 'Vui lòng cung cấp tên nhóm và thành viên' });
+    }
+
+    const currentUserId = req.user.id;
+    const participants = [...new Set([...userIds, currentUserId])].map(id => new mongoose.Types.ObjectId(id));
+
+    if (participants.length < 3) {
+      return res.status(400).json({ message: 'Nhóm chat cần ít nhất 3 thành viên (bao gồm bạn)' });
+    }
+
+    const groupChat = new Conversation({
+      isGroup: true,
+      chatName,
+      participants,
+      groupAdmin: currentUserId
+    });
+
+    await groupChat.save();
+
+    const fullGroupChat = await Conversation.findById(groupChat._id).populate('participants', 'name avatar email');
+    
+    res.status(201).json(fullGroupChat);
+  } catch (error) {
+    console.error('Lỗi khi tạo nhóm chat:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+};

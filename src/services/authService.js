@@ -3,6 +3,7 @@ const Profile = require('../models/Profile');
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const redisClient = require('../config/redis');
+const axios = require('axios');
 
 // Cấu hình Nodemailer gửi email (Bạn cần thiết lập biến môi trường EMAIL_USER, EMAIL_PASS)
 const transporter = nodemailer.createTransport({
@@ -235,6 +236,66 @@ const handleResendRegisterOtp = async (email) => {
 
   await sendRegisterOtpEmail(email, user.name, otp);
 };
-module.exports = { handleForgotPassword, handleResetPassword, handleLogin, handleRegister,
+
+const handleGoogleLogin = async (token) => {
+  // Use access_token to get user info from Google
+  const response = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  
+  const { sub, email, name, picture } = response.data;
+
+  let user = await User.findOne({ email });
+
+  if (!user) {
+    // Nếu chưa có user thì tạo mới
+    const password = Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8); // Random password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    user = new User({
+      name,
+      email,
+      studentId: `google_${sub}`, // Unique dummy ID for Google users
+      password: hashedPassword,
+      avatar: picture,
+      isEmailVerified: true, // Google đã xác thực
+      googleId: sub
+    });
+
+    await user.save();
+
+    // Tạo profile rỗng
+    try {
+      const newProfile = new Profile({
+        user: user._id,
+        status: 'Developer',
+        faculty: 'Chưa cập nhật',
+        skills: []
+      });
+      await newProfile.save();
+    } catch (err) {
+      console.error('Lỗi khi tự động tạo profile qua Google Login:', err);
+    }
+  } else {
+    // Nếu có user rồi nhưng chưa link Google ID, có thể cập nhật thêm
+    if (!user.googleId) {
+      user.googleId = sub;
+      user.isEmailVerified = true;
+      if (!user.avatar) user.avatar = picture;
+      await user.save();
+    }
+  }
+
+  return user;
+};
+
+module.exports = { 
+  handleForgotPassword, 
+  handleResetPassword, 
+  handleLogin, 
+  handleRegister,
   handleVerifyRegisterOtp,
-  handleResendRegisterOtp };
+  handleResendRegisterOtp,
+  handleGoogleLogin
+};

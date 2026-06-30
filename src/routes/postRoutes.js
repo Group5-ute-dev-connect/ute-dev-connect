@@ -4,6 +4,7 @@ const { check } = require('express-validator');
 
 const { verifyToken, optionalToken } = require('../middlewares/authMiddleware');
 const postController = require('../controllers/postController');
+const upload = require('../middlewares/uploadMiddleware');
 
 // @route   GET /api/posts
 // @desc    Lấy tất cả bài viết
@@ -17,6 +18,7 @@ router.post(
   '/',
   [
     verifyToken,
+    upload.array('media', 5),
     [
       check('text', 'Nội dung không được để trống').trim().not().isEmpty(),
     ],
@@ -110,6 +112,20 @@ router.put(
 // @access  Private
 router.delete('/comment/:id/:comment_id', verifyToken, postController.deleteComment);
 
+// @route   POST /api/posts/comment/:id/:comment_id/reply
+// @desc    Thêm phản hồi cho bình luận
+// @access  Private
+router.post(
+  '/comment/:id/:comment_id/reply',
+  [
+    verifyToken,
+    [
+      check('text', 'Nội dung phản hồi không được để trống').trim().not().isEmpty(),
+    ],
+  ],
+  postController.addReply
+);
+
 // @route   PUT /api/posts/:id
 // @desc    Sửa bài viết
 // @access  Private
@@ -117,6 +133,7 @@ router.put(
   '/:id',
   [
     verifyToken,
+    upload.array('media', 5),
     [
       check('text', 'Nội dung không được để trống').trim().not().isEmpty(),
     ],
