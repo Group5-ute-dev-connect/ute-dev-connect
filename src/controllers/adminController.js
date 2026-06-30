@@ -3,6 +3,7 @@ const Post = require('../models/Post');
 const Group = require('../models/Group');
 const Filter = require('../models/Filter');
 const Profile = require('../models/Profile');
+const logService = require('../services/logService');
 
 // Helper to fill in dates with 0 counts for chart rendering
 const fillMissingDates = (statsArray, startDate, endDate) => {
@@ -244,6 +245,25 @@ const getSystemStats = async (req, res) => {
   }
 };
 
+const getSystemLogs = async (req, res) => {
+  try {
+    const { type, action, search, startDate, endDate, page, limit } = req.query;
+    const filters = {};
+    if (type && type !== 'all') filters.type = type;
+    if (action) filters.action = action;
+    if (search) filters.search = search;
+    if (startDate) filters.startDate = startDate;
+    if (endDate) filters.endDate = endDate;
+
+    const result = await logService.getLogs(filters, parseInt(page) || 1, parseInt(limit) || 15);
+    res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error('Lỗi khi lấy log hệ thống:', err.message);
+    res.status(500).json({ success: false, message: 'Lỗi Server khi tải nhật ký hoạt động' });
+  }
+};
+
 module.exports = {
-  getSystemStats
+  getSystemStats,
+  getSystemLogs
 };
