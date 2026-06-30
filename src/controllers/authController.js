@@ -125,6 +125,38 @@ const resendRegisterOtp = async (req, res) => {
     });
   }
 };
+
+const googleLogin = async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    // Gọi service xử lý logic
+    const user = await authService.handleGoogleLogin(token);
+
+    // Tạo JWT Token
+    const jwtToken = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET || 'ute_social_network_secret',
+      { expiresIn: '1h' }
+    );
+
+    const redirectUrl = user.role === 'admin' ? '/api/admin/profile' : '/api/user/profile';
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đăng nhập Google thành công',
+      token: jwtToken,
+      role: user.role,
+      redirectUrl
+    });
+  } catch (error) {
+    return res.status(401).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
 // Export tất cả các hàm
 module.exports = {
     forgotPassword,
@@ -132,5 +164,6 @@ module.exports = {
     login,
     register,
     verifyRegisterOtp,
-    resendRegisterOtp
+    resendRegisterOtp,
+    googleLogin
 };

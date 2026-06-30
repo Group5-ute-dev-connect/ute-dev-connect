@@ -1,11 +1,10 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
+const mongoose = require('mongoose');
 
 // Lấy danh sách phòng chat của user hiện tại
 exports.getConversations = async (req, res) => {
   try {
-    console.log("=> GET /chat/conversations, req.user.id:", req.user.id);
-    const mongoose = require('mongoose');
     const objectId = new mongoose.Types.ObjectId(req.user.id);
     
     const conversations = await Conversation.find({
@@ -15,10 +14,6 @@ exports.getConversations = async (req, res) => {
       .populate('lastMessage')
       .sort({ updatedAt: -1 });
 
-    console.log("=> Found conversations count:", conversations.length);
-    if (conversations.length > 0) {
-      console.log("=> First conversation ID:", conversations[0]._id);
-    }
     res.status(200).json(conversations);
   } catch (error) {
     console.error('Lỗi khi lấy danh sách phòng chat:', error);
@@ -30,7 +25,6 @@ exports.getConversations = async (req, res) => {
 exports.getMessages = async (req, res) => {
   try {
     const { conversationId } = req.params;
-    const mongoose = require('mongoose');
     const objectId = new mongoose.Types.ObjectId(req.user.id);
 
     // Kiểm tra xem phòng chat có tồn tại và user có nằm trong phòng đó không
@@ -65,7 +59,6 @@ exports.createOrGetConversation = async (req, res) => {
   try {
     const { userId } = req.params; // ID của người muốn chat cùng
     const currentUserId = req.user.id;
-    const mongoose = require('mongoose');
     const objectCurrentId = new mongoose.Types.ObjectId(currentUserId);
     const objectUserId = new mongoose.Types.ObjectId(userId);
 
@@ -116,6 +109,40 @@ exports.uploadFile = async (req, res) => {
     });
   } catch (error) {
     console.error('Lỗi khi tải tệp tin lên:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+};
+
+// Tạo phòng chat nhóm
+exports.createGroup = async (req, res) => {
+  try {
+    const { chatName, userIds } = req.body;
+    
+    if (!chatName || !userIds || userIds.length === 0) {
+      return res.status(400).json({ message: 'Vui lòng cung cấp tên nhóm và thành viên' });
+    }
+
+    const currentUserId = req.user.id;
+    const participants = [...new Set([...userIds, currentUserId])].map(id => new mongoose.Types.ObjectId(id));
+
+    if (participants.length < 3) {
+      return res.status(400).json({ message: 'Nhóm chat cần ít nhất 3 thành viên (bao gồm bạn)' });
+    }
+
+    const groupChat = new Conversation({
+      isGroup: true,
+      chatName,
+      participants,
+      groupAdmin: currentUserId
+    });
+
+    await groupChat.save();
+
+    const fullGroupChat = await Conversation.findById(groupChat._id).populate('participants', 'name avatar email');
+    
+    res.status(201).json(fullGroupChat);
+  } catch (error) {
+    console.error('Lỗi khi tạo nhóm chat:', error);
     res.status(500).json({ message: 'Lỗi server' });
   }
 };

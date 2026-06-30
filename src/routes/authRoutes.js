@@ -49,4 +49,7 @@ router.post(
   authController.resendRegisterOtp
 );
 
+// API Đăng nhập Google
+router.post('/google', authController.googleLogin);
+
 module.exports = router;

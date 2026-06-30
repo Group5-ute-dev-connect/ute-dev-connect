@@ -19,6 +19,11 @@ router.get('/:conversationId/messages', verifyToken, chatController.getMessages)
 // @access  Private
 router.post('/upload', verifyToken, upload.single('file'), chatController.uploadFile);
 
+// @route   POST /api/chat/group
+// @desc    Tạo phòng chat nhóm
+// @access  Private
+router.post('/group', verifyToken, chatController.createGroup);
+
 // @route   POST /api/chat/:userId
 // @desc    Tạo hoặc lấy phòng chat với một user khác
 // @access  Private

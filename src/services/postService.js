@@ -4,7 +4,7 @@ const Group = require('../models/Group');
 const PostView = require('../models/PostView');
 const logService = require('./logService');
 
-const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public') => {
+const createPost = async (userId, text, isQuestion = false, groupId = null, codeSnippet = '', codeLanguage = 'javascript', visibility = 'public', media = [], tags = []) => {
   try {
     let status = 'approved';
     let isPendingDueToBannedWord = false;
@@ -71,6 +71,8 @@ const createPost = async (userId, text, isQuestion = false, groupId = null, code
       codeLanguage,
       status,
       visibility,
+      media,
+      tags
     });
 
     let post = await newPost.save();
@@ -691,7 +693,7 @@ const addComment = async (postId, userId, text, codeSnippet = '', codeLanguage =
 };
 
 // Cập nhật bài viết
-const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLanguage, visibility) => {
+const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLanguage, visibility, media, tags) => {
   try {
     const post = await Post.findById(postId);
     if (!post || post.isDeleted) {
@@ -778,6 +780,8 @@ const updatePost = async (postId, userId, text, isQuestion, codeSnippet, codeLan
     }
     
     post.visibility = visibility !== undefined ? visibility : post.visibility;
+    if (media !== undefined) post.media = media;
+    if (tags !== undefined) post.tags = tags;
     
     await post.save();
     
@@ -1202,6 +1206,88 @@ const disapproveComment = async (postId, commentId, userId) => {
   }
 };
 
+// Thêm phản hồi vào bình luận
+const addReply = async (postId, commentId, userId, text) => {
+  try {
+    const normalizedText = text ? text.trim() : '';
+
+    if (!normalizedText) {
+      const error = new Error('Nội dung phản hồi không được để trống');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const user = await User.findById(userId).select('-password');
+    if (!user) {
+      const error = new Error('Người dùng không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const post = await Post.findById(postId);
+    if (!post) {
+      const error = new Error('Bài viết không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const comment = post.comments.id ? post.comments.id(commentId) : post.comments.find(c => c._id.toString() === commentId.toString());
+    if (!comment) {
+      const error = new Error('Bình luận không tồn tại');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    // Lọc nội dung cấm
+    let groupBannedWords = [];
+    if (post.group) {
+      const group = await Group.findById(post.group);
+      if (group) {
+        groupBannedWords = group.bannedWords || [];
+      }
+    }
+
+    const filterService = require('./filterService');
+    const textCheck = await filterService.checkContentWithGroup(normalizedText, groupBannedWords);
+    
+    if (textCheck.isViolation) {
+      const violationWord = textCheck.word || '';
+      const violationReason = textCheck.reason || '';
+      const error = new Error(violationWord ? `Nội dung chứa từ cấm không cho phép: "${violationWord}"` : `Nội dung vi phạm chính sách kiểm duyệt: ${violationReason}`);
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const newReply = {
+      user: userId,
+      text: normalizedText,
+      name: user.name,
+      avatar: user.avatar,
+      date: Date.now()
+    };
+
+    if (!comment.replies) {
+      comment.replies = [];
+    }
+    comment.replies.push(newReply);
+    await post.save();
+
+    await post.populate('comments.user', 'name avatar reputation');
+    await post.populate('comments.replies.user', 'name avatar reputation');
+
+    return {
+      comments: post.comments
+    };
+  } catch (error) {
+    if (error.kind === 'ObjectId') {
+      const invalidIdError = new Error('Định dạng ID không hợp lệ');
+      invalidIdError.statusCode = 400;
+      throw invalidIdError;
+    }
+    throw error;
+  }
+};
+
 module.exports = {
   createPost,
   getPostById,
@@ -1221,4 +1307,5 @@ module.exports = {
   acceptAnswer,
   approveComment,
   disapproveComment,
+  addReply,
 };
