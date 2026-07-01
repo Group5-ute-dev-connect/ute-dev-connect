@@ -1,33 +1,77 @@
-# 🌿 Git Branch Naming Convention
+# 💻 UTE Dev Connect - Backend API
+
+> **UTE Dev Connect** là mạng xã hội học tập và kết nối dành riêng cho sinh viên và lập trình viên trường Đại học Sư phạm Kỹ thuật TP.HCM (HCMUTE). Dự án giúp kết nối, chia sẻ kiến thức, thảo luận nhóm, tìm kiếm tài liệu và tương tác thời gian thực.
+
+Đây là kho lưu trữ mã nguồn **Backend** của dự án. Kho lưu trữ mã nguồn **Frontend** có thể được tìm thấy tại:  
+👉 **[UTE Dev Connect Frontend Repository](https://github.com/Group5-ute-dev-connect/ute-dev-connect-client)**
 
 ---
 
-## 🌱 Các loại nhánh chính
+## 🛠️ Công nghệ sử dụng (Tech Stack)
 
-- **main** hoặc **master** → Nhánh chính (production)
-- **develop** → Nhánh phát triển chính
-- **feature/tên-tính-năng** → Nhánh phát triển tính năng mới
-- **hotfix/tên-lỗi** → Nhánh sửa lỗi khẩn cấp (sau khi đẩy lên `main`)
-- **fix/tên-lỗi** → Nhánh sửa lỗi
-- **release/version-x.y.z** → Nhánh chuẩn bị release
+Backend được xây dựng trên nền tảng Node.js với mô hình MVC và các thư viện hiện đại:
+
+- **Runtime Environment:** [Node.js](https://nodejs.org/) (JavaScript trên Server)
+- **Web Framework:** [Express.js](https://expressjs.com/) (Framework tối giản và linh hoạt)
+- **Database:** [MongoDB](https://www.mongodb.com/) (Hệ cơ sở dữ liệu NoSQL) thông qua [Mongoose](https://mongoosejs.com/) ODM
+- **Real-time Communication:** [Socket.io](https://socket.io/) (Xử lý nhắn tin & thông báo thời gian thực)
+- **Peer-to-Peer Calls:** [PeerJS](https://peerjs.com/) (Hỗ trợ gọi video/audio WebRTC)
+- **Caching & Session:** [Redis](https://redis.io/) (Tối ưu hóa hiệu năng và tốc độ truy vấn)
+- **Authentication:** [JSON Web Token (JWT)](https://jwt.io/), [bcryptjs](https://github.com/dcodeIO/bcrypt.js) (Mã hóa mật khẩu) & [Google Auth Library](https://github.com/googleapis/google-auth-library-nodejs) (Đăng nhập bằng Google)
+- **File Upload:** [Multer](https://github.com/expressjs/multer) & [Cloudinary](https://cloudinary.com/) (Lưu trữ và quản lý hình ảnh/video đám mây)
+- **Mail Service:** [Nodemailer](https://nodemailer.com/) (Gửi email xác nhận, khôi phục mật khẩu)
+- **Security & Utilities:** `express-rate-limit` (Chống brute-force/DDOS cơ bản), `express-validator` (Validate dữ liệu đầu vào), `cookie-parser`, `cors`.
 
 ---
 
-## 📌 Ví dụ
+## ⚙️ Các bước cài đặt và chạy dự án (Setup Guide)
 
-- `fix/login-bug` → Nhánh sửa lỗi đăng nhập  
-- `fix/ui-overlap` → Nhánh sửa lỗi UI bị chồng chéo
+### 1. Yêu cầu hệ thống (Prerequisites)
+Hãy đảm bảo bạn đã cài đặt các công cụ sau trên máy:
+- **Node.js** (Khuyến nghị phiên bản LTS v18 trở lên)
+- **NPM** (Đi kèm khi cài đặt Node.js)
+- **MongoDB** (Local instance hoặc MongoDB Atlas)
+- **Redis** (Local instance hoặc Cloud Redis)
 
----
+### 2. Tải mã nguồn về máy
+```bash
+git clone https://github.com/Group5-ute-dev-connect/ute-dev-connect.git
+cd ute-dev-connect
+```
+*(Nếu bạn dùng bản fork, hãy đổi link git clone cho phù hợp)*
 
-## ⚠️ Lưu ý quan trọng
+### 3. Cài đặt các gói phụ thuộc
+```bash
+npm install
+```
 
-- Dùng dấu **“-”** thay vì **“_”** hoặc **space** để tránh lỗi  
-- Đặt tên **ngắn gọn**, **dễ hiểu**, mô tả rõ nội dung  
-- **Không nên dùng tiếng Việt có dấu** trong tên nhánh  
-- Mỗi chức năng nên tạo **nhánh riêng**  
-- Code chỉnh sửa nên thực hiện trên nhánh `develop`  
-  - Sau khi hoàn thành → tạo `release` → merge vào `main`
+### 4. Cấu hình biến môi trường (Environment Variables)
+Tạo file `.env` ở thư mục gốc (hoặc sao chép từ `.env.example`):
+```bash
+cp .env.example .env
+```
+Mở file `.env` và điền đầy đủ các thông tin cấu hình:
+- `PORT`: Cổng chạy server (ví dụ: `5000`)
+- `NODE_ENV`: Môi trường chạy (`development` hoặc `production`)
+- `DATABASE_URL`: Đường dẫn kết nối CSDL MongoDB Atlas hoặc Local
+- `JWT_SECRET`: Chuỗi khóa bí mật dùng để mã hóa mã JWT
+- `REDIS_URL`: URL kết nối Redis server (mặc định: `redis://localhost:6379`)
+- `EMAIL_USER` & `EMAIL_PASS`: Email gửi và mật khẩu ứng dụng (App Password) để gửi mail kích hoạt/phục hồi mật khẩu
+- `MISTRAL_API_KEY`: API Key kết nối Mistral AI phục vụ chatbot AI
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`: Thông tin cấu hình Cloudinary dùng để lưu trữ file phương tiện (ảnh, video)
+- `CLIENT_URL`: URL của frontend client để cấu hình CORS (ví dụ: `http://localhost:5173`)
+- `GOOGLE_CLIENT_ID`: ID Client Google OAuth dùng để xác thực người dùng đăng nhập Google
 
+### 5. Khởi chạy Server ở chế độ Phát triển (Development)
+Server hỗ trợ tự động tải lại khi có thay đổi trong mã nguồn (`src/`) hoặc file cấu hình (`.env`) nhờ `nodemon`:
+```bash
+# Sử dụng script start
+npm start
+
+# Hoặc sử dụng script dev (đã được bổ sung)
+npm run dev
+```
+
+Server sẽ mặc định chạy tại địa chỉ: `http://localhost:5000`
 
 ---
