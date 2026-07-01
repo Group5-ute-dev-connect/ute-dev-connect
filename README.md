@@ -65,11 +65,7 @@ Mở file `.env` và điền đầy đủ các thông tin cấu hình:
 ### 5. Khởi chạy Server ở chế độ Phát triển (Development)
 Server hỗ trợ tự động tải lại khi có thay đổi trong mã nguồn (`src/`) hoặc file cấu hình (`.env`) nhờ `nodemon`:
 ```bash
-# Sử dụng script start
-npm start
-
-# Hoặc sử dụng script dev (đã được bổ sung)
-npm run dev
+npm start dev
 ```
 
 Server sẽ mặc định chạy tại địa chỉ: `http://localhost:5000`
